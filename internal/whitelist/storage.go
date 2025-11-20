@@ -34,7 +34,7 @@ func Open(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-func (s *Store) Add(ctx context.Context, discordID, minecraft_uuid string, username string) error {
+func (s *Store) Add(ctx context.Context, discordID, minecraft_uuid, username string) error {
 	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO whitelist(discord_id,minecraft_uuid,username) VALUES(?,?,?)`, discordID, minecraft_uuid, username)
 	return err
 }
