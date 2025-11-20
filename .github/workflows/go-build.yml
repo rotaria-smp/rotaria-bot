@@ -28,19 +28,3 @@ jobs:
         run: make build
       - name: Test (Makefile)
         run: make test
-      # - name: Smoke run (logging init)
-      #   env:
-      #     ENV: dev
-      #     LOG_LEVEL: debug
-      #     LOG_PATH: ./logs/rotaria.log
-      #     DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-      #   run: |
-      #     ./bin/rotaria-bot || true
-      #     echo "Generated log file (if any):"
-      #     ls -l logs || true
-      # - name: Upload logs
-      #   if: always()
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: build-logs
-      #     path: logs/
