@@ -1,9 +1,10 @@
 package discord
 
 import (
-	"log"
+	"fmt"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/rotaria-smp/rotaria-bot/internal/shared/logging"
 )
 
 type Bot struct {
@@ -24,13 +25,13 @@ func New(token string) (*Bot, error) {
 }
 
 func (b *Bot) onReady(_ *discordgo.Session, r *discordgo.Ready) {
-	log.Printf("Discord connected as %s#%s", r.User.Username, r.User.Discriminator)
+	logging.L().Info("Discord connected as", "user", fmt.Sprintf("%s#%s", r.User.Username, r.User.Discriminator))
 }
 
 func (b *Bot) Start() error {
 	err := b.session.Open()
 	if err == nil {
-		log.Printf("gateway connected; sessionID=%s", b.session.State.SessionID)
+		logging.L().Debug("gateway connected", "sessionID", b.session.State.SessionID)
 	}
 	return err
 }

@@ -1,7 +1,6 @@
 package websocket
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/gorilla/websocket"
@@ -24,7 +23,7 @@ var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { retu
 func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("ws upgrade: %v", err)
+		logging.L().Error("handleClient: ws upgrade", "err", err)
 		return
 	}
 	s.hub.Add(c)
@@ -43,10 +42,10 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMinecraft(w http.ResponseWriter, r *http.Request) {
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("mc upgrade: %v", err)
+		logging.L().Error("handleMinecraft: ws upgrade", "err", err)
 		return
 	}
-	log.Println("Minecraft connected via WebSocket")
+	logging.L().Info("handleMinecraft: Minecraft connected via WebSocket")
 	s.bridge.Attach(c)
 }
 

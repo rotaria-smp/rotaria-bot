@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"log"
-
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/rotaria-smp/rotaria-bot/internal/shared/logging"
@@ -78,7 +76,7 @@ func (b *Bridge) readLoop(c *websocket.Conn) {
 			if ch != nil {
 				ch <- resp{body: f.Body}
 			} else {
-				logging.L().Debug("bridge: RES for unknown id=%s (pending=%d)", f.ID, pend)
+				logging.L().Debug("bridge RES for unknown id", "id", f.ID, "pending", pend)
 			}
 
 		case "ERR":
@@ -90,7 +88,7 @@ func (b *Bridge) readLoop(c *websocket.Conn) {
 			if ch != nil {
 				ch <- resp{err: errors.New(f.Msg)}
 			} else {
-				logging.L().Error("bridge: ERR for unknown id=%s (pending=%d)", f.ID, pend)
+				logging.L().Error("bridge ERR for unknown id", "id", f.ID, "pending", pend)
 			}
 
 		case "EVT":
@@ -145,7 +143,7 @@ func (b *Bridge) SendCommand(ctx context.Context, body string) (string, error) {
 		return "", fmt.Errorf("write failed: %w", err)
 	}
 
-	log.Printf("bridge: sent CMD id=%s body=%q", id, body)
+	logging.L().Info("bridge sent CMD", "id", id, "body", body)
 
 	tmr := time.NewTimer(10 * time.Second)
 	defer tmr.Stop()
@@ -153,24 +151,24 @@ func (b *Bridge) SendCommand(ctx context.Context, body string) (string, error) {
 	select {
 	case r := <-ch:
 		if r.err != nil {
-			log.Printf("bridge: CMD id=%s error=%v", id, r.err)
+			logging.L().Error("bridge CMD error", "id", id, "err", r.err)
 			return "", r.err
 		}
-		log.Printf("bridge: CMD id=%s result=%q", id, r.body)
+		logging.L().Info("bridge CMD result", "id", id, "result", r.body)
 		return r.body, nil
 
 	case <-tmr.C:
 		b.mu.Lock()
 		delete(b.pending, id)
 		b.mu.Unlock()
-		log.Printf("bridge: CMD id=%s timeout", id)
+		logging.L().Warn("bridge CMD timeout", "id", id)
 		return "", errors.New("timeout")
 
 	case <-ctx.Done():
 		b.mu.Lock()
 		delete(b.pending, id)
 		b.mu.Unlock()
-		log.Printf("bridge: CMD id=%s ctxErr=%v", id, ctx.Err())
+		logging.L().Warn("bridge CMD context done", "id", id, "err", ctx.Err())
 		return "", ctx.Err()
 	}
 }
