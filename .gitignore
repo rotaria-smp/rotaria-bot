@@ -1,2 +1,6 @@
 .env
 bin/
+data/
+logs/
+database.db
+dist
