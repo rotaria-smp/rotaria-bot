@@ -1,10 +1,10 @@
 package websocket
 
 import (
-	"log"
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"github.com/rotaria-smp/rotaria-bot/internal/shared/logging"
 )
 
 type Hub struct {
@@ -34,7 +34,7 @@ func (h *Hub) Broadcast(msg []byte) {
 	defer h.mu.RUnlock()
 	for c := range h.conns {
 		if err := c.WriteMessage(websocket.TextMessage, msg); err != nil {
-			log.Printf("broadcast error: %v", err)
+			logging.L().Error("broadcast error", "error", err)
 		}
 	}
 }

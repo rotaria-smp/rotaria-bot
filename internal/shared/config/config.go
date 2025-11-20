@@ -1,10 +1,10 @@
 package config
 
 import (
-	"log"
 	"os"
 
 	"github.com/joho/godotenv"
+	"github.com/rotaria-smp/rotaria-bot/internal/shared/logging"
 )
 
 type Config struct {
@@ -50,7 +50,7 @@ func loadDotEnv() {
 	path := os.Getenv("ENV_FILE")
 	if path != "" {
 		if err := godotenv.Load(path); err != nil {
-			log.Printf("env: could not load %s: %v", path, err)
+			logging.L().Error("ENV: could not load file", "path", path, "error", err)
 		}
 		return
 	}

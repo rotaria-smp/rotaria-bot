@@ -3,7 +3,6 @@ package discord
 import (
 	"context"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/rotaria-smp/rotaria-bot/internal/discord/namemc"
 	"github.com/rotaria-smp/rotaria-bot/internal/mcbridge"
 	"github.com/rotaria-smp/rotaria-bot/internal/shared/config"
+	"github.com/rotaria-smp/rotaria-bot/internal/shared/logging"
 	"github.com/rotaria-smp/rotaria-bot/internal/whitelist"
 )
 
@@ -56,7 +56,7 @@ func (a *App) Register() error {
 }
 
 func (a *App) onReady(s *discordgo.Session, r *discordgo.Ready) {
-	log.Printf("Ready as %s#%s", r.User.Username, r.User.Discriminator)
+	logging.L().Info("Ready", "user", fmt.Sprintf("%s#%s", r.User.Username, r.User.Discriminator))
 }
 
 func (a *App) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -64,12 +64,11 @@ func (a *App) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 		return
 	}
 
-	log.Printf("onMessageCreate: channel=%s author=%s content=%q",
-		m.ChannelID, m.Author.ID, m.Content)
+	logging.L().Debug("onMessageCreate: received message", "channel", m.ChannelID, "author", m.Author.ID, "content", m.Content)
 
 	// Blacklist check
 	if a.Blacklist != nil && a.Blacklist.Contains(m.Content) {
-		log.Printf("Blocked message from %s (blacklist hit)", m.Author.ID)
+		logging.L().Info("Blocked message from user (blacklist hit)", "message", m.Content, "user", m.Author.ID)
 		_ = s.ChannelMessageDelete(m.ChannelID, m.ID)
 		return
 	}
@@ -79,7 +78,7 @@ func (a *App) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 	}
 
 	if !a.Bridge.IsConnected() {
-		log.Printf("minecraft not connected; cannot relay discord message")
+		logging.L().Debug("minecraft not connected; cannot relay discord message")
 		return
 	}
 
@@ -91,13 +90,13 @@ func (a *App) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 
 	ctx := context.Background()
 	payload := fmt.Sprintf("say [Discord] %s: %s", m.Author.Username, text)
-	log.Printf("Relaying to Minecraft via bridge: %q", payload)
+	logging.L().Debug("Relaying to Minecraft via bridge", "payload", payload)
 
 	out, err := a.Bridge.SendCommand(ctx, payload)
 	if err != nil {
-		log.Printf("relay to minecraft failed: %v", err)
+		logging.L().Warn("relay to minecraft failed", "error", err)
 	} else {
-		log.Printf("relay to minecraft ok, response=%q", out)
+		logging.L().Debug("relay to minecraft ok", "response", out)
 	}
 }
 
@@ -114,7 +113,7 @@ func (a *App) onGuildMemberRemove(s *discordgo.Session, ev *discordgo.GuildMembe
 		_, _ = a.Bridge.SendCommand(ctx, "unwhitelist "+entry.Username)
 	}
 	_ = a.WLStore.Remove(ctx, ev.User.ID)
-	log.Printf("Removed whitelist for %s (%s)", entry.Username, ev.User.ID)
+	logging.L().Info("Removed whitelist for user", "username", entry.Username, "discord_id", ev.User.ID)
 }
 
 func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -130,7 +129,7 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 				},
 			})
 			if err != nil {
-				log.Printf("defer list respond: %v", err)
+				logging.L().Warn("defer list respond failed", "error", err)
 				return
 			}
 			go func() {
@@ -140,12 +139,11 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 				if err != nil {
 					out = "Error: " + err.Error()
 				}
-				// Edit original deferred reply
 				_, e2 := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 					Content: &out,
 				})
 				if e2 != nil {
-					log.Printf("edit list reply: %v", e2)
+					logging.L().Warn("edit list reply failed", "error", e2)
 				}
 			}()
 		case "whitelist":
@@ -234,13 +232,12 @@ func (a *App) openWhitelistModal(i *discordgo.InteractionCreate) {
 }
 
 func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
-	log.Printf("handleWhitelistSubmit: guild=%s user=%s",
-		i.GuildID, i.Member.User.ID)
+	logging.L().Debug("handleWhitelistSubmit: guild and user", "guild", i.GuildID, "user", i.Member.User.ID)
 
 	username := modalValue(i, "mc_username")
 	age := modalValue(i, "age")
 	plan := modalValue(i, "plan")
-	log.Printf("handleWhitelistSubmit: username=%q age=%q plan=%q", username, age, plan)
+	logging.L().Debug("handleWhitelistSubmit: received form values", "username", username, "age", age, "plan", plan)
 
 	if username == "" || age == "" || plan == "" {
 		a.reply(i, "Missing required fields.", true)
@@ -249,12 +246,12 @@ func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 
 	uuid, err := a.NameMC.UsernameToUUID(username)
 	if err != nil {
-		log.Printf("handleWhitelistSubmit: UsernameToUUID(%q) failed: %v", username, err)
+		logging.L().Debug("handleWhitelistSubmit: UsernameToUUID failed", "username", username, "error", err)
 		a.reply(i, fmt.Sprintf("Seems like username %q does not exist.", username), true)
 		return
 	}
 
-	log.Printf("handleWhitelistSubmit: resolved %s -> %s", username, uuid)
+	logging.L().Debug("handleWhitelistSubmit: resolved username to UUID", "username", username, "uuid", uuid)
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "Whitelist Request",
@@ -289,9 +286,9 @@ func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 	}
 
 	if a.Cfg.WhitelistRequestsChannelID == "" {
-		log.Printf("handleWhitelistSubmit: WhitelistRequestsChannelID is empty; not sending embed")
+		logging.L().Debug("handleWhitelistSubmit: WhitelistRequestsChannelID is empty; not sending embed")
 	} else {
-		log.Printf("handleWhitelistSubmit: sending embed to channel %s", a.Cfg.WhitelistRequestsChannelID)
+		logging.L().Debug("handleWhitelistSubmit: sending embed to channel", "channel", a.Cfg.WhitelistRequestsChannelID)
 		_, err := a.Session.ChannelMessageSendComplex(
 			a.Cfg.WhitelistRequestsChannelID,
 			&discordgo.MessageSend{
@@ -300,14 +297,13 @@ func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 			},
 		)
 		if err != nil {
-			log.Printf("handleWhitelistSubmit: ChannelMessageSendComplex failed: %v", err)
+			logging.L().Error("handleWhitelistSubmit: ChannelMessageSendComplex failed", "error", err)
 		}
 	}
 
 	a.reply(i, fmt.Sprintf("Submitted whitelist request for %s. Staff will review soon.", username), true)
 }
 
-// Handle approve/reject buttons
 func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 	custom := i.MessageComponentData().CustomID
 	approved := false
@@ -330,7 +326,6 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 	username := parts[0]
 	requesterID := parts[1]
 
-	// Update the review embed in-place
 	if len(i.Message.Embeds) > 0 {
 		cp := *i.Message.Embeds[0]
 
@@ -348,7 +343,6 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 			cp.Description += "\n\n" + statusLine
 		}
 
-		// Add/update "Decision" field
 		found := false
 		for _, f := range cp.Fields {
 			if strings.EqualFold(f.Name, "Decision") {
@@ -370,7 +364,6 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 			cp.Color = 0xEF4444
 		}
 
-		// Replace embed & remove the buttons
 		_ = a.Session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseUpdateMessage,
 			Data: &discordgo.InteractionResponseData{
@@ -382,7 +375,6 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 		a.reply(i, "Missing embed.", true)
 	}
 
-	// Apply whitelist only on approval
 	if approved {
 		ctx := context.Background()
 		_ = a.WLStore.Add(ctx, requesterID, username)
@@ -401,8 +393,6 @@ func ternary[T any](cond bool, a T, b T) T {
 	}
 	return b
 }
-
-// --- report modal (extended) ---
 
 func (a *App) openReportModal(i *discordgo.InteractionCreate) {
 	_ = a.Session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -537,7 +527,7 @@ func (a *App) handleReportActionModal(i *discordgo.InteractionCreate) {
 	} else {
 		cp.Description += "\n\n" + line
 	}
-	// Remove action buttons
+
 	cp.Color = color
 	cp.Timestamp = time.Now().UTC().Format(time.RFC3339)
 	embeds := []*discordgo.MessageEmbed{&cp}
@@ -567,30 +557,26 @@ func modalValue(i *discordgo.InteractionCreate, id string) string {
 
 var chatLineRe = regexp.MustCompile(`^<([^>]+)>[ ]?(.*)$`)
 
-// HandleMCEvent forwards Minecraft events to Discord
 func (a *App) HandleMCEvent(topic, body string) {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return
 	}
 
-	// Status → presence or status channel
 	if topic == "status" {
 		body = strings.TrimSpace(body)
 		if body == "" {
 			return
 		}
 
-		// Set presence text, e.g. "1/20 online"
 		if err := a.Session.UpdateGameStatus(0, body); err != nil {
-			log.Printf("HandleMCEvent: failed to update presence: %v", err)
+			logging.L().Error("HandleMCEvent: failed to update presence", "error", err)
 		} else {
-			log.Printf("HandleMCEvent: updated presence to %q", body)
+			logging.L().Debug("HandleMCEvent: updated presence", "presence", body)
 		}
 		return
 	}
 
-	// Join/leave/lifecycle simple pass-through (webhook if set)
 	if topic == "join" || topic == "leave" || topic == "lifecycle" {
 		a.sendWebhook("Rotaria", body, "https://cdn.discordapp.com/icons/1373389493218050150/24f94fe60c73b4af4956f10dbecb5919.webp")
 		return
@@ -605,6 +591,7 @@ func (a *App) HandleMCEvent(topic, body string) {
 		}
 
 		if a.Blacklist != nil && a.Blacklist.Contains(msg) {
+			logging.L().Info("Blocked message from user (blacklist hit)", "message", msg, "user", username)
 			if a.Bridge.IsConnected() {
 				ctx := context.Background()
 				_, _ = a.Bridge.SendCommand(ctx, "kick "+username)
@@ -622,10 +609,12 @@ func (a *App) HandleMCEvent(topic, body string) {
 
 func (a *App) sendWebhook(username, content, avatar string) {
 	if a.Cfg.DiscordWebhookURL == "" {
+		logging.L().Debug("sendWebhook: DiscordWebhookURL is empty, not sending webhook")
 		return
 	}
 	flag := discordwebhook.MessageFlagSuppressNotifications
 	if content == "" {
+		logging.L().Debug("sendWebhook: webhook message is empty will not send.")
 		return
 	}
 	msg := discordwebhook.Message{
@@ -635,6 +624,6 @@ func (a *App) sendWebhook(username, content, avatar string) {
 		Flags:     &flag,
 	}
 	if err := discordwebhook.SendMessage(a.Cfg.DiscordWebhookURL, msg); err != nil {
-		log.Printf("webhook send failed: %v", err)
+		logging.L().Error("sendWebhook: webhook send fail", "error", err)
 	}
 }

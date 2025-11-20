@@ -65,9 +65,9 @@ func Init(opt Options) {
 			handlers = append(handlers, consoleHandler)
 		}
 
-		multi := multiHandler(handlers...)
+		multi := fanout{hs: handlers}
 		logger = slog.New(multi)
-		logger.Info("logger initialized",
+		logger.Debug("logger initialized",
 			"path", opt.Path,
 			"level", opt.Level,
 			"console", opt.Console,

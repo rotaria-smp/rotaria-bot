@@ -36,3 +36,7 @@ func (l *List) Contains(s string) bool {
 	}
 	return false
 }
+
+func (l *List) Words() []string {
+	return append([]string(nil), l.words...)
+}

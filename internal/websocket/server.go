@@ -6,6 +6,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/rotaria-smp/rotaria-bot/internal/mcbridge"
+	"github.com/rotaria-smp/rotaria-bot/internal/shared/logging"
 )
 
 type Server struct {
@@ -53,6 +54,6 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleClient)
 	mux.HandleFunc("/mc", s.handleMinecraft)
-	log.Printf("WebSocket listening on %s", s.addr)
+	logging.L().Info("websocket listening", "addr", s.addr)
 	return http.ListenAndServe(s.addr, mux)
 }

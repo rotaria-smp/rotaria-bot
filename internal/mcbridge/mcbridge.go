@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/rotaria-smp/rotaria-bot/internal/shared/logging"
 )
 
 type Frame struct {
@@ -62,10 +63,10 @@ func (b *Bridge) readLoop(c *websocket.Conn) {
 		}
 		var f Frame
 		if err := json.Unmarshal(data, &f); err != nil {
-			log.Printf("bridge: bad json: %v", err)
+			logging.L().Warn("bridge bad json", "err", err)
 			continue
 		}
-		log.Printf("bridge: recv frame type=%s id=%s topic=%s", f.Type, f.ID, f.Topic)
+		logging.L().Debug("bridge recv", "type", f.Type, "id", f.ID, "topic", f.Topic)
 
 		switch f.Type {
 		case "RES":
@@ -77,7 +78,7 @@ func (b *Bridge) readLoop(c *websocket.Conn) {
 			if ch != nil {
 				ch <- resp{body: f.Body}
 			} else {
-				log.Printf("bridge: RES for unknown id=%s (pending=%d)", f.ID, pend)
+				logging.L().Debug("bridge: RES for unknown id=%s (pending=%d)", f.ID, pend)
 			}
 
 		case "ERR":
@@ -89,7 +90,7 @@ func (b *Bridge) readLoop(c *websocket.Conn) {
 			if ch != nil {
 				ch <- resp{err: errors.New(f.Msg)}
 			} else {
-				log.Printf("bridge: ERR for unknown id=%s (pending=%d)", f.ID, pend)
+				logging.L().Error("bridge: ERR for unknown id=%s (pending=%d)", f.ID, pend)
 			}
 
 		case "EVT":
@@ -101,7 +102,7 @@ func (b *Bridge) readLoop(c *websocket.Conn) {
 			}
 
 		default:
-			log.Printf("bridge: unknown frame type=%s", f.Type)
+			logging.L().Debug("bridge: unknown frame type", "type", f.Type)
 		}
 	}
 
@@ -109,19 +110,18 @@ func (b *Bridge) readLoop(c *websocket.Conn) {
 	defer b.mu.Unlock()
 
 	if b.conn == c {
-		log.Printf("bridge: readLoop closing active conn; failing %d pending commands", len(b.pending))
+		logging.L().Warn("bridge: readLoop closing active conn; failing pending commands", "pending", len(b.pending))
 		b.conn = nil
 		for id, ch := range b.pending {
 			delete(b.pending, id)
 			ch <- resp{err: errors.New("bridge closed")}
 		}
 	} else {
-		log.Printf("bridge: readLoop exit for stale conn")
+		logging.L().Warn("bridge: readLoop exit for stale conn")
 	}
 }
 
 func (b *Bridge) SendCommand(ctx context.Context, body string) (string, error) {
-	// Grab the conn and register pending
 	b.mu.Lock()
 	c := b.conn
 	if c == nil {

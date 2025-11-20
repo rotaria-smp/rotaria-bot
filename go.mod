@@ -8,6 +8,7 @@ require (
 	github.com/gorilla/websocket v1.5.1
 	github.com/joho/godotenv v1.5.1
 	github.com/rotaria-smp/discordwebhook v0.0.0-20250910154909-ff36bd297286
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	modernc.org/sqlite v1.38.2
 )
 
