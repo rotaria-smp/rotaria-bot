@@ -5,45 +5,54 @@ import (
 	"net/http"
 
 	"github.com/gorilla/websocket"
+	"github.com/rotaria-smp/rotaria-bot/internal/mcbridge"
 )
 
 type Server struct {
-	addr string
-	hub  *Hub
+	addr   string
+	hub    *Hub
+	bridge *mcbridge.Bridge
 }
 
-func NewServer(addr string, hub *Hub) *Server {
-	return &Server{addr: addr, hub: hub}
+func NewServer(addr string, hub *Hub, bridge *mcbridge.Bridge) *Server {
+	return &Server{addr: addr, hub: hub, bridge: bridge}
 }
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
+var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 
-func (s *Server) handler(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
+	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("upgrade error: %v", err)
+		log.Printf("ws upgrade: %v", err)
 		return
 	}
-	s.hub.Add(conn)
-
+	s.hub.Add(c)
 	go func() {
-		defer s.hub.Remove(conn)
+		defer s.hub.Remove(c)
 		for {
-			_, data, err := conn.ReadMessage()
+			_, data, err := c.ReadMessage()
 			if err != nil {
 				return
 			}
-			// Echo + broadcast
 			s.hub.Broadcast(data)
 		}
 	}()
 }
 
+func (s *Server) handleMinecraft(w http.ResponseWriter, r *http.Request) {
+	c, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("mc upgrade: %v", err)
+		return
+	}
+	log.Println("Minecraft connected via WebSocket")
+	s.bridge.Attach(c)
+}
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", s.handler)
+	mux.HandleFunc("/ws", s.handleClient)
+	mux.HandleFunc("/mc", s.handleMinecraft)
 	log.Printf("WebSocket listening on %s", s.addr)
 	return http.ListenAndServe(s.addr, mux)
 }
