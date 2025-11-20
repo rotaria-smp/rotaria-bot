@@ -1,0 +1,37 @@
+services:
+  mc:
+    image: itzg/minecraft-server
+    ports:
+      - 25565:25565
+      - 8123:8123
+    environment:
+      - EULA=TRUE
+      - VERSION=1.21.1
+      - MAX_MEMORY=4G
+      - TYPE=neoforge
+      - MOTD=Minecrafft neoforge Server
+      - OPS=BiNUS1
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
+    volumes:
+      - ./data/minecraft-server/data:/data
+    depends_on:
+      - bot
+  bot:
+    build: .
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      WS_ADDR: ${WS_ADDR:-:8080}
+      BLACKLIST_PATH: /app/blacklist.txt
+      DB_PATH: /app/database.db
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+      REPORT_CHANNEL_ID: ${REPORT_CHANNEL_ID}
+      WHITELIST_REQUESTS_CHANNEL_ID: ${WHITELIST_REQUESTS_CHANNEL_ID}
+      GUILD_ID: ${GUILD_ID}
+      MEMBER_ROLE_ID: ${MEMBER_ROLE_ID}
+    volumes:
+      - ./blacklist.txt:/app/blacklist.txt:ro
+      - ./database.db:/app/database.db
+
