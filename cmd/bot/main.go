@@ -6,7 +6,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/bwmarrin/discordgo"
 	"github.com/rotaria-smp/rotaria-bot/internal/discord"
 	"github.com/rotaria-smp/rotaria-bot/internal/discord/blacklist"
 	"github.com/rotaria-smp/rotaria-bot/internal/mcbridge"
@@ -21,18 +20,14 @@ func main() {
 		log.Fatal("DISCORD_TOKEN not set")
 	}
 
-	// Discord session
-	sess, err := discordgo.New("Bot " + cfg.DiscordToken)
+	bot, err := discord.New(cfg.DiscordToken)
 	if err != nil {
 		log.Fatalf("discord init: %v", err)
 	}
-	sess.Identify.Intents = discordgo.IntentsGuilds |
-		discordgo.IntentsGuildMessages |
-		discordgo.IntentsGuildMembers
-
-	if err := sess.Open(); err != nil {
+	if err := bot.Start(); err != nil {
 		log.Fatalf("discord open: %v", err)
 	}
+	sess := bot.Session()
 
 	bl, err := blacklist.Load(cfg.BlacklistPath)
 	if err != nil {
@@ -41,17 +36,19 @@ func main() {
 
 	wlStore, err := whitelist.Open(cfg.DBPath)
 	if err != nil {
-		log.Fatalf("whitelist store: %v", err)
+		log.Fatalf("whitelist store: %v (DB_PATH=%s)", err, cfg.DBPath)
 	}
 
-	bridge := mcbridge.New(func(topic, body string) {
-		// handle inbound Minecraft events if needed
-	})
+	bridge := mcbridge.New(nil)
 
 	app := discord.NewApp(sess, cfg, bridge, wlStore, bl)
 	if err := app.Register(); err != nil {
 		log.Fatalf("register: %v", err)
 	}
+
+	bridge.SetHandler(func(topic, body string) {
+		app.HandleMCEvent(topic, body)
+	})
 
 	hub := websocket.NewHub()
 	wsServer := websocket.NewServer(cfg.WSAddr, hub, bridge)

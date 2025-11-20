@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -62,23 +63,29 @@ func (a *App) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 	if m.Author.Bot {
 		return
 	}
-	// Webhook forward + blacklist check
+
+	// Blacklist check
 	if a.Blacklist != nil && a.Blacklist.Contains(m.Content) {
 		log.Printf("Blocked message from %s", m.Author.ID)
 		_ = s.ChannelMessageDelete(m.ChannelID, m.ID)
 		return
 	}
-	if a.Cfg.DiscordWebhookURL != "" {
-		flag := discordwebhook.MessageFlagSuppressNotifications
-		username := fmt.Sprintf("%s#%s", m.Author.Username, m.Author.Discriminator)
-		content := m.Content
-		msg := discordwebhook.Message{
-			Content:  &content,
-			Username: &username,
-			Flags:    &flag,
+
+	if m.ChannelID == a.Cfg.MinecraftDiscordMessengerChannelID {
+		if !a.Bridge.IsConnected() {
+			log.Printf("minecraft not connected; cannot relay discord message")
+			return
 		}
-		if err := discordwebhook.SendMessage(a.Cfg.DiscordWebhookURL, msg); err != nil {
-			log.Printf("webhook send failed: %v", err)
+		// Basic single‑line sanitize
+		text := strings.TrimSpace(m.Content)
+		if text == "" {
+			return
+		}
+		text = strings.ReplaceAll(text, "\n", " ")
+		ctx := context.Background()
+		payload := fmt.Sprintf("[Discord] %s: %s", m.Author.Username, text)
+		if _, err := a.Bridge.SendCommand(ctx, payload); err != nil {
+			log.Printf("relay to minecraft failed: %v", err)
 		}
 	}
 }
@@ -102,15 +109,34 @@ func (a *App) onGuildMemberRemove(s *discordgo.Session, ev *discordgo.GuildMembe
 func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	switch i.Type {
 	case discordgo.InteractionApplicationCommand:
-		name := i.ApplicationCommandData().Name
-		switch name {
+		switch i.ApplicationCommandData().Name {
 		case "list":
-			ctx := context.Background()
-			out, err := a.Bridge.SendCommand(ctx, "list")
+			// Immediate deferred ack (ephemeral)
+			err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags: discordgo.MessageFlagsEphemeral,
+				},
+			})
 			if err != nil {
-				out = "Minecraft not connected"
+				log.Printf("defer list respond: %v", err)
+				return
 			}
-			a.reply(i, out, true)
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+				defer cancel()
+				out, err := a.Bridge.SendCommand(ctx, "list")
+				if err != nil {
+					out = "Error: " + err.Error()
+				}
+				// Edit original deferred reply
+				_, e2 := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+					Content: &out,
+				})
+				if e2 != nil {
+					log.Printf("edit list reply: %v", e2)
+				}
+			}()
 		case "whitelist":
 			a.openWhitelistModal(i)
 		case "report":
@@ -131,6 +157,8 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 			a.openWhitelistModal(i)
 		} else if strings.HasPrefix(c, "report_resolve_") || strings.HasPrefix(c, "report_dismiss_") {
 			a.openReportActionModal(i)
+		} else if strings.HasPrefix(c, "approve_") || strings.HasPrefix(c, "reject_") {
+			a.handleWhitelistDecision(i)
 		}
 	}
 }
@@ -149,8 +177,6 @@ func (a *App) reply(i *discordgo.InteractionCreate, msg string, eph bool) {
 	})
 }
 
-// --- whitelist (simplified modal) ---
-
 func (a *App) openWhitelistModal(i *discordgo.InteractionCreate) {
 	_ = a.Session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
@@ -159,7 +185,34 @@ func (a *App) openWhitelistModal(i *discordgo.InteractionCreate) {
 			Title:    "Whitelist Application",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					&discordgo.TextInput{CustomID: "mc_username", Label: "Minecraft Username", Style: discordgo.TextInputShort, Required: true},
+					&discordgo.TextInput{
+						CustomID:    "mc_username",
+						Label:       "Minecraft Username",
+						Style:       discordgo.TextInputShort,
+						Required:    true,
+						Placeholder: "Exact in‑game name",
+						MaxLength:   64,
+					},
+				}},
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+					&discordgo.TextInput{
+						CustomID:    "age",
+						Label:       "Age",
+						Style:       discordgo.TextInputShort,
+						Required:    true,
+						Placeholder: "e.g. 18",
+						MaxLength:   8,
+					},
+				}},
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+					&discordgo.TextInput{
+						CustomID:    "plan",
+						Label:       "What do you plan to do on the server?",
+						Style:       discordgo.TextInputParagraph,
+						Required:    true,
+						Placeholder: "Build, economy, towns, redstone, etc.",
+						MaxLength:   500,
+					},
 				}},
 			},
 		},
@@ -168,24 +221,149 @@ func (a *App) openWhitelistModal(i *discordgo.InteractionCreate) {
 
 func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 	username := modalValue(i, "mc_username")
-	if username == "" {
-		a.reply(i, "Missing username", true)
+	age := modalValue(i, "age")
+	plan := modalValue(i, "plan")
+	if username == "" || age == "" || plan == "" {
+		a.reply(i, "Missing required fields.", true)
 		return
 	}
+
 	uuid, err := a.NameMC.UsernameToUUID(username)
 	if err != nil {
-		a.reply(i, "Could not resolve username", true)
+		a.reply(i, fmt.Sprintf("Could not resolve username %q", username), true)
 		return
 	}
-	ctx := context.Background()
-	_ = a.WLStore.Add(ctx, i.Member.User.ID, username)
-	if a.Bridge.IsConnected() {
-		_, _ = a.Bridge.SendCommand(ctx, "whitelist add "+username)
+
+	// Send review embed instead of immediate whitelist add
+	embed := &discordgo.MessageEmbed{
+		Title:       "Whitelist Request",
+		Description: "A new whitelist request has been submitted.",
+		Color:       0x3B82F6,
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Applicant", Value: "<@" + i.Member.User.ID + ">", Inline: true},
+			{Name: "Minecraft Username", Value: "`" + username + "`", Inline: true},
+			{Name: "UUID", Value: "`" + uuid + "`", Inline: true},
+			{Name: "Age", Value: age, Inline: true},
+			{Name: "Plan", Value: plan},
+		},
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Footer:    &discordgo.MessageEmbedFooter{Text: "Rotaria Whitelist"},
 	}
-	a.reply(i, fmt.Sprintf("Whitelisted %s (UUID %s). Await staff review.", username, uuid), true)
+
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+			&discordgo.Button{
+				CustomID: "approve_" + username + "|" + i.Member.User.ID,
+				Label:    "Approve",
+				Style:    discordgo.SuccessButton,
+			},
+			&discordgo.Button{
+				CustomID: "reject_" + username + "|" + i.Member.User.ID,
+				Label:    "Reject",
+				Style:    discordgo.DangerButton,
+			},
+		}},
+	}
+
+	if a.Cfg.WhitelistRequestsChannelID != "" {
+		_, _ = a.Session.ChannelMessageSendComplex(a.Cfg.WhitelistRequestsChannelID, &discordgo.MessageSend{
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: components,
+		})
+	}
+
+	a.reply(i, fmt.Sprintf("Submitted whitelist request for %s. Staff will review soon.", username), true)
 }
 
-// --- report (simplified) ---
+// Handle approve/reject buttons
+func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
+	custom := i.MessageComponentData().CustomID
+	approved := false
+	var prefix string
+	if strings.HasPrefix(custom, "approve_") {
+		approved = true
+		prefix = "approve_"
+	} else if strings.HasPrefix(custom, "reject_") {
+		prefix = "reject_"
+	} else {
+		return
+	}
+
+	payload := strings.TrimPrefix(custom, prefix)
+	parts := strings.SplitN(payload, "|", 2)
+	if len(parts) != 2 {
+		a.reply(i, "Malformed decision ID.", true)
+		return
+	}
+	username := parts[0]
+	requesterID := parts[1]
+
+	// Edit embed
+	if len(i.Message.Embeds) > 0 {
+		cp := *i.Message.Embeds[0]
+		statusLine := fmt.Sprintf("📝 Request for `%s` was **%s** by <@%s>. (Requested by: <@%s>)",
+			username, ternary(approved, "Approved", "Rejected"), i.Member.User.ID, requesterID)
+		if strings.TrimSpace(cp.Description) == "" {
+			cp.Description = statusLine
+		} else {
+			cp.Description += "\n\n" + statusLine
+		}
+
+		// Add/update Decision field
+		found := false
+		for _, f := range cp.Fields {
+			if strings.EqualFold(f.Name, "Decision") {
+				f.Value = ternary(approved, "Approved", "Rejected")
+				found = true
+				break
+			}
+		}
+		if !found {
+			cp.Fields = append(cp.Fields, &discordgo.MessageEmbedField{
+				Name:  "Decision",
+				Value: ternary(approved, "Approved", "Rejected"),
+			})
+		}
+		cp.Timestamp = time.Now().UTC().Format(time.RFC3339)
+		if approved {
+			cp.Color = 0x22C55E
+		} else {
+			cp.Color = 0xEF4444
+		}
+
+		_ = a.Session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Embeds:     []*discordgo.MessageEmbed{&cp},
+				Components: []discordgo.MessageComponent{},
+			},
+		})
+	} else {
+		a.reply(i, "Missing embed.", true)
+	}
+
+	// Apply whitelist only on approval
+	if approved {
+		ctx := context.Background()
+		_ = a.WLStore.Add(ctx, requesterID, username)
+		if a.Bridge.IsConnected() {
+			_, _ = a.Bridge.SendCommand(ctx, "whitelist add "+username)
+		}
+		// Optional DM
+		if dm, err := a.Session.UserChannelCreate(requesterID); err == nil {
+			_, _ = a.Session.ChannelMessageSend(dm.ID, fmt.Sprintf("✅ You have been whitelisted: %s", username))
+		}
+	}
+}
+
+func ternary[T any](cond bool, a T, b T) T {
+	if cond {
+		return a
+	}
+	return b
+}
+
+// --- report modal (extended) ---
 
 func (a *App) openReportModal(i *discordgo.InteractionCreate) {
 	_ = a.Session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -195,13 +373,19 @@ func (a *App) openReportModal(i *discordgo.InteractionCreate) {
 			Title:    "Report Issue",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					&discordgo.TextInput{CustomID: "report_type", Label: "Type (player/bug/other)", Style: discordgo.TextInputShort, Required: true},
+					&discordgo.TextInput{CustomID: "report_type", Label: "Report Type (player / bug / other)", Style: discordgo.TextInputShort, Required: true, MaxLength: 16},
 				}},
 				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					&discordgo.TextInput{CustomID: "reported_username", Label: "Player (if player type)", Style: discordgo.TextInputShort},
+					&discordgo.TextInput{CustomID: "reported_username", Label: "Reported Player (if type=player)", Style: discordgo.TextInputShort, Required: false, MaxLength: 64},
 				}},
 				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					&discordgo.TextInput{CustomID: "report_reason", Label: "Details", Style: discordgo.TextInputParagraph, Required: true},
+					&discordgo.TextInput{CustomID: "report_reason", Label: "Details - what happened?", Style: discordgo.TextInputParagraph, Required: true, MaxLength: 1000},
+				}},
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+					&discordgo.TextInput{CustomID: "report_evidence", Label: "Evidence (links, optional)", Style: discordgo.TextInputShort, Required: false, MaxLength: 200, Placeholder: "Screenshot / video links"},
+				}},
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+					&discordgo.TextInput{CustomID: "report_context", Label: "Context (where/when, optional)", Style: discordgo.TextInputShort, Required: false, MaxLength: 200},
 				}},
 			},
 		},
@@ -209,38 +393,61 @@ func (a *App) openReportModal(i *discordgo.InteractionCreate) {
 }
 
 func (a *App) handleReportSubmit(i *discordgo.InteractionCreate) {
-	t := modalValue(i, "report_type")
-	player := modalValue(i, "reported_username")
-	reason := modalValue(i, "report_reason")
-	embed := &discordgo.MessageEmbed{
-		Title:       "New Report",
-		Description: "Incoming report",
-		Color:       0xF44336,
-		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Reporter", Value: "<@" + i.Member.User.ID + ">", Inline: true},
-			{Name: "Type", Value: t, Inline: true},
-		},
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	t := strings.ToLower(strings.TrimSpace(modalValue(i, "report_type")))
+	player := strings.TrimSpace(modalValue(i, "reported_username"))
+	reason := strings.TrimSpace(modalValue(i, "report_reason"))
+	evidence := strings.TrimSpace(modalValue(i, "report_evidence"))
+	context := strings.TrimSpace(modalValue(i, "report_context"))
+
+	if t == "player" && player == "" {
+		a.reply(i, "Player report requires a username.", true)
+		return
+	}
+
+	fields := []*discordgo.MessageEmbedField{
+		{Name: "Reporter", Value: "<@" + i.Member.User.ID + ">", Inline: true},
+		{Name: "Type", Value: strings.Title(t), Inline: true},
 	}
 	if player != "" {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Player", Value: "`" + player + "`", Inline: true})
+		fields = append(fields, &discordgo.MessageEmbedField{Name: "Reported Player", Value: "`" + player + "`", Inline: true})
 	}
 	if reason != "" {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Details", Value: reason})
+		fields = append(fields, &discordgo.MessageEmbedField{Name: "Details", Value: reason})
 	}
+	if evidence != "" {
+		fields = append(fields, &discordgo.MessageEmbedField{Name: "Evidence", Value: evidence})
+	}
+	if context != "" {
+		fields = append(fields, &discordgo.MessageEmbedField{Name: "Context", Value: context})
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       fmt.Sprintf("New %s Report", strings.Title(t)),
+		Description: "A new report has been filed.",
+		Color:       0xF44336,
+		Fields:      fields,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		Footer:      &discordgo.MessageEmbedFooter{Text: "Rotaria Moderation"},
+	}
+
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 			&discordgo.Button{CustomID: "report_resolve_" + player + "|" + i.Member.User.ID, Label: "Resolve", Style: discordgo.SuccessButton},
 			&discordgo.Button{CustomID: "report_dismiss_" + player + "|" + i.Member.User.ID, Label: "Dismiss", Style: discordgo.DangerButton},
 		}},
 	}
-	_, _ = a.Session.ChannelMessageSendComplex(a.Cfg.ReportChannelID, &discordgo.MessageSend{
-		Embeds:     []*discordgo.MessageEmbed{embed},
-		Components: components,
-	})
-	a.reply(i, "Report submitted", true)
+
+	if a.Cfg.ReportChannelID != "" {
+		_, _ = a.Session.ChannelMessageSendComplex(a.Cfg.ReportChannelID, &discordgo.MessageSend{
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: components,
+		})
+	}
+
+	a.reply(i, "Report submitted.", true)
 }
 
+// Open moderator action modal for resolve/dismiss
 func (a *App) openReportActionModal(i *discordgo.InteractionCreate) {
 	cid := i.MessageComponentData().CustomID
 	action := "resolve"
@@ -254,50 +461,54 @@ func (a *App) openReportActionModal(i *discordgo.InteractionCreate) {
 			Title:    strings.Title(action) + " Report",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					&discordgo.TextInput{CustomID: "moderator_note", Label: "Moderator Note", Style: discordgo.TextInputParagraph, Required: true},
+					&discordgo.TextInput{CustomID: "moderator_note", Label: "Moderator Note", Style: discordgo.TextInputParagraph, Required: true, MaxLength: 1000},
 				}},
 			},
 		},
 	})
 }
 
+// Handle moderator action modal submission
 func (a *App) handleReportActionModal(i *discordgo.InteractionCreate) {
 	parts := strings.SplitN(i.ModalSubmitData().CustomID, "|", 3)
 	if len(parts) != 3 {
 		return
 	}
 	action := parts[1]
-	orig := parts[2] // original component id
+	orig := parts[2]
 	note := modalValue(i, "moderator_note")
-	msg := i.Message
-	if msg == nil {
-		a.reply(i, "Original message missing", true)
-		return
+	if note == "" {
+		note = "(no note)"
 	}
-	if len(msg.Embeds) == 0 {
-		a.reply(i, "Embed missing", true)
+	msg := i.Message
+	if msg == nil || len(msg.Embeds) == 0 {
+		a.reply(i, "Original report message missing.", true)
 		return
 	}
 	cp := *msg.Embeds[0]
-	cp.Color = 0x22C55E
 	label := "Resolved"
+	color := 0x22C55E
 	if action == "dismiss" {
-		cp.Color = 0xEF4444
 		label = "Dismissed"
+		color = 0xEF4444
 	}
 	line := fmt.Sprintf("📝 %s by <@%s>. Note: %s", label, i.Member.User.ID, note)
-	if cp.Description == "" {
+	if strings.TrimSpace(cp.Description) == "" {
 		cp.Description = line
 	} else {
 		cp.Description += "\n\n" + line
 	}
+	// Remove action buttons
+	cp.Color = color
+	cp.Timestamp = time.Now().UTC().Format(time.RFC3339)
 	_, _ = a.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{
 		Channel:    i.ChannelID,
-		ID:         i.Message.ID,
-		Embeds:     &[]*discordgo.MessageEmbed{&cp},
-		Components: &[]discordgo.MessageComponent{},
+		ID:         msg.ID,
+		Embeds:     []*discordgo.MessageEmbed{&cp},
+		Components: []discordgo.MessageComponent{},
 	})
-	a.reply(i, "Updated.", true)
+	a.reply(i, "Report updated.", true)
+	_ = orig
 }
 
 // helpers
@@ -312,4 +523,72 @@ func modalValue(i *discordgo.InteractionCreate, id string) string {
 		}
 	}
 	return ""
+}
+
+var chatLineRe = regexp.MustCompile(`^<([^>]+)>[ ]?(.*)$`)
+
+// HandleMCEvent forwards Minecraft events to Discord
+func (a *App) HandleMCEvent(topic, body string) {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return
+	}
+
+	// Status → presence or status channel
+	if topic == "status" {
+		if a.Cfg.ServerStatusChannelID != "" {
+			// _, _ = a.Session.ChannelMessageSend(a.Cfg.ServerStatusChannelID, body)
+			fmt.Println("New status", body)
+		}
+		return
+	}
+
+	// Join/leave/lifecycle simple pass-through (webhook if set)
+	if topic == "join" || topic == "leave" || topic == "lifecycle" {
+		a.sendWebhook("Rotaria", body, "https://cdn.discordapp.com/icons/1373389493218050150/24f94fe60c73b4af4956f10dbecb5919.webp")
+		return
+	}
+
+	if topic == "chat" {
+		username := "Server"
+		msg := body
+		if m := chatLineRe.FindStringSubmatch(body); m != nil {
+			username = m[1]
+			msg = m[2]
+		}
+
+		if a.Blacklist != nil && a.Blacklist.Contains(msg) {
+			// Optionally issue kick
+			if a.Bridge.IsConnected() {
+				ctx := context.Background()
+				_, _ = a.Bridge.SendCommand(ctx, "kick "+username)
+			}
+			return
+		}
+
+		if strings.TrimSpace(msg) == "" {
+			return
+		}
+
+		a.sendWebhook(username, msg, "https://minotar.net/avatar/"+username+"/128.png")
+	}
+}
+
+func (a *App) sendWebhook(username, content, avatar string) {
+	if a.Cfg.DiscordWebhookURL == "" {
+		return
+	}
+	flag := discordwebhook.MessageFlagSuppressNotifications
+	if content == "" {
+		return
+	}
+	msg := discordwebhook.Message{
+		Content:   &content,
+		Username:  &username,
+		AvatarURL: &avatar,
+		Flags:     &flag,
+	}
+	if err := discordwebhook.SendMessage(a.Cfg.DiscordWebhookURL, msg); err != nil {
+		log.Printf("webhook send failed: %v", err)
+	}
 }

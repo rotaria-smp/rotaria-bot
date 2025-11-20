@@ -15,6 +15,9 @@ func New(token string) (*Bot, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.Identify.Intents = discordgo.IntentsGuilds |
+		discordgo.IntentsGuildMessages |
+		discordgo.IntentsGuildMembers
 	b := &Bot{session: s}
 	s.AddHandler(b.onReady)
 	return b, nil
@@ -25,9 +28,15 @@ func (b *Bot) onReady(_ *discordgo.Session, r *discordgo.Ready) {
 }
 
 func (b *Bot) Start() error {
-	return b.session.Open()
+	err := b.session.Open()
+	if err == nil {
+		log.Printf("gateway connected; sessionID=%s", b.session.State.SessionID)
+	}
+	return err
 }
 
 func (b *Bot) Stop() {
 	_ = b.session.Close()
 }
+
+func (b *Bot) Session() *discordgo.Session { return b.session }
