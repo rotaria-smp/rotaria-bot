@@ -13,13 +13,6 @@ permissions:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
 
     steps:
       - name: Checkout
@@ -46,8 +39,8 @@ jobs:
           echo "SemVer=${{ steps.gitversion.outputs.semVer }}"
           echo "Informational=${{ steps.gitversion.outputs.informationalVersion }}"
 
-      - name: Create tag (single matrix entry)
-        if: ${{ matrix.goos == 'linux' && matrix.goarch == 'amd64' && !startsWith(github.ref, 'refs/tags/') }}
+      - name: Create tag (if not already a tag ref)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: |
           TAG="v${{ steps.gitversion.outputs.semVer }}"
           if ! git rev-parse "$TAG" >/dev/null 2>&1; then
@@ -61,25 +54,20 @@ jobs:
 
       - name: Build
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
+          GOOS: linux
+          GOARCH: amd64
           VERSION: ${{ steps.gitversion.outputs.informationalVersion }}
         run: |
           mkdir -p dist
           GOOS=${GOOS} GOARCH=${GOARCH} VERSION=${VERSION} make build
-          cp bin/rotaria-bot dist/rotaria-bot_${GOOS}_${GOARCH}
-          chmod +x dist/rotaria-bot_${GOOS}_${GOARCH}
-
-      - name: Aggregate artifacts
-        if: ${{ matrix.goos == 'linux' && matrix.goarch == 'amd64' }}
-        run: ls -l dist
+          cp bin/rotaria-bot dist/rotaria-bot_linux_amd64
+          chmod +x dist/rotaria-bot_linux_amd64
 
       - name: Create GitHub Release
-        if: ${{ matrix.goos == 'linux' && matrix.goarch == 'amd64' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', steps.gitversion.outputs.semVer) }}
           prerelease: ${{ steps.gitversion.outputs.preReleaseTag != '' }}
           files: dist/*
         env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
