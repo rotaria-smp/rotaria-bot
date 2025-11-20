@@ -23,6 +23,7 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	// TODO : If user have changed their minecraft name this will be a problem we should save their minecraft UUID in db instead
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS whitelist (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         discord_id TEXT NOT NULL UNIQUE,

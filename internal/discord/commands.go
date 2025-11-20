@@ -170,6 +170,7 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 				}
 			}()
 		case "lookup":
+			// TODO : If user have changed their minecraft name this will be a problem we should save their minecraft UUID in db instead
 			ctx := context.Background()
 			selectedUser := i.ApplicationCommandData().Options[0].UserValue(s).ID
 			user, err := a.WLStore.GetByDiscord(ctx, selectedUser)
