@@ -381,7 +381,13 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 
 	if approved {
 		ctx := context.Background()
-		_ = a.WLStore.Add(ctx, requesterID, username)
+		uuid, err := a.NameMC.UsernameToUUID(username)
+		if err != nil {
+			logging.L().Error("handleWhitelistDecision: UsernameToUUID failed", "username", username, "error", err)
+			a.reply(i, fmt.Sprintf("Could not resolve username %q or UUID endpoint is down.", username), true)
+			return
+		}
+		_ = a.WLStore.Add(ctx, requesterID, uuid, username)
 		if a.Bridge.IsConnected() {
 			_, _ = a.Bridge.SendCommand(ctx, "whitelist add "+username)
 		}
