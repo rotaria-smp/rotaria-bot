@@ -26,6 +26,9 @@ type App struct {
 	NameMC    *namemc.Client
 }
 
+var chatLineRe = regexp.MustCompile(`^<([^>]+)>[ ]?(.*)$`)
+var atEveryone = regexp.MustCompile(`@everyone`)
+
 func NewApp(sess *discordgo.Session, cfg config.Config, bridge *mcbridge.Bridge, wl *whitelist.Store, bl *blacklist.List) *App {
 	return &App{
 		Session:   sess,
@@ -42,13 +45,29 @@ func (a *App) Register() error {
 	a.Session.AddHandler(a.onMessageCreate)
 	a.Session.AddHandler(a.onGuildMemberRemove)
 	a.Session.AddHandler(a.onInteraction)
+
+	// IDK what permission here is wanted we'll use ban permission for now
+	var lookupCommandPermissions int64 = discordgo.PermissionBanMembers
+
 	commands := []*discordgo.ApplicationCommand{
 		{Name: "list", Description: "List online players"},
 		{Name: "whitelist", Description: "Begin whitelist application"},
 		{Name: "report", Description: "Report an issue"},
+		{Name: "lookup", Description: "Lookup Minecraft username (admin only)", Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionUser,
+				Name:        "discord_use",
+				Description: "Discord user ID to lookup",
+				Required:    true,
+			},
+		},
+			DefaultMemberPermissions: &lookupCommandPermissions,
+			Contexts:                 &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
+		},
 	}
 	for _, c := range commands {
 		if _, err := a.Session.ApplicationCommandCreate(a.Session.State.User.ID, "", c); err != nil {
+			logging.L().Error("failed to create application command", "command", c.Name, "err", err)
 			return err
 		}
 	}
@@ -150,10 +169,28 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 					logging.L().Warn("edit list reply failed", "error", e2)
 				}
 			}()
+		case "lookup":
+			// TODO : If user have changed their minecraft name this will be a problem we should save their minecraft UUID in db instead
+			ctx := context.Background()
+			selectedUser := i.ApplicationCommandData().Options[0].UserValue(s).ID
+			user, err := a.WLStore.GetByDiscord(ctx, selectedUser)
+			if err != nil {
+				logging.L().Error("onInteraction: Could not lookup user", "error", err, "user", selectedUser)
+				a.reply(i, fmt.Sprintf("Could not lookup <@%s>: %v", selectedUser, err), true)
+				return
+			}
+			if user == nil {
+				a.reply(i, fmt.Sprintf("<@%s> is not whitelisted", selectedUser), true)
+				return
+			}
+			a.reply(i, fmt.Sprintf("<@%s> has the ingame name `%s`", selectedUser, user.Username), true)
+			return
+
 		case "whitelist":
 			a.openWhitelistModal(i)
 		case "report":
 			a.openReportModal(i)
+
 		}
 	case discordgo.InteractionModalSubmit:
 		cid := i.ModalSubmitData().CustomID
@@ -309,6 +346,10 @@ func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 }
 
 func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
+	if !a.Bridge.IsConnected() {
+		a.reply(i, "Minecraft server is not connected; cannot process whitelist decisions right now.", true)
+		return
+	}
 	custom := i.MessageComponentData().CustomID
 	approved := false
 	var prefix string
@@ -486,7 +527,6 @@ func (a *App) handleReportSubmit(i *discordgo.InteractionCreate) {
 	a.reply(i, "Report submitted.", true)
 }
 
-// Open moderator action modal for resolve/dismiss
 func (a *App) openReportActionModal(i *discordgo.InteractionCreate) {
 	cid := i.MessageComponentData().CustomID
 	action := "resolve"
@@ -507,7 +547,6 @@ func (a *App) openReportActionModal(i *discordgo.InteractionCreate) {
 	})
 }
 
-// Handle moderator action modal submission
 func (a *App) handleReportActionModal(i *discordgo.InteractionCreate) {
 	parts := strings.SplitN(i.ModalSubmitData().CustomID, "|", 3)
 	if len(parts) != 3 {
@@ -564,9 +603,6 @@ func modalValue(i *discordgo.InteractionCreate, id string) string {
 	}
 	return ""
 }
-
-var chatLineRe = regexp.MustCompile(`^<([^>]+)>[ ]?(.*)$`)
-var atEveryone = regexp.MustCompile(`@everyone`)
 
 func (a *App) HandleMCEvent(topic, body string) {
 	body = strings.TrimSpace(body)
