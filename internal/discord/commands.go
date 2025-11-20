@@ -64,29 +64,40 @@ func (a *App) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 		return
 	}
 
+	log.Printf("onMessageCreate: channel=%s author=%s content=%q",
+		m.ChannelID, m.Author.ID, m.Content)
+
 	// Blacklist check
 	if a.Blacklist != nil && a.Blacklist.Contains(m.Content) {
-		log.Printf("Blocked message from %s", m.Author.ID)
+		log.Printf("Blocked message from %s (blacklist hit)", m.Author.ID)
 		_ = s.ChannelMessageDelete(m.ChannelID, m.ID)
 		return
 	}
 
-	if m.ChannelID == a.Cfg.MinecraftDiscordMessengerChannelID {
-		if !a.Bridge.IsConnected() {
-			log.Printf("minecraft not connected; cannot relay discord message")
-			return
-		}
-		// Basic single‑line sanitize
-		text := strings.TrimSpace(m.Content)
-		if text == "" {
-			return
-		}
-		text = strings.ReplaceAll(text, "\n", " ")
-		ctx := context.Background()
-		payload := fmt.Sprintf("[Discord] %s: %s", m.Author.Username, text)
-		if _, err := a.Bridge.SendCommand(ctx, payload); err != nil {
-			log.Printf("relay to minecraft failed: %v", err)
-		}
+	if m.ChannelID != a.Cfg.MinecraftDiscordMessengerChannelID {
+		return
+	}
+
+	if !a.Bridge.IsConnected() {
+		log.Printf("minecraft not connected; cannot relay discord message")
+		return
+	}
+
+	text := strings.TrimSpace(m.Content)
+	if text == "" {
+		return
+	}
+	text = strings.ReplaceAll(text, "\n", " ")
+
+	ctx := context.Background()
+	payload := fmt.Sprintf("say [Discord] %s: %s", m.Author.Username, text)
+	log.Printf("Relaying to Minecraft via bridge: %q", payload)
+
+	out, err := a.Bridge.SendCommand(ctx, payload)
+	if err != nil {
+		log.Printf("relay to minecraft failed: %v", err)
+	} else {
+		log.Printf("relay to minecraft ok, response=%q", out)
 	}
 }
 
@@ -182,47 +193,55 @@ func (a *App) openWhitelistModal(i *discordgo.InteractionCreate) {
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
 			CustomID: "whitelist_modal",
-			Title:    "Whitelist Application",
+			Title:    "Enter Your Minecraft Username",
 			Components: []discordgo.MessageComponent{
-				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					&discordgo.TextInput{
-						CustomID:    "mc_username",
-						Label:       "Minecraft Username",
-						Style:       discordgo.TextInputShort,
-						Required:    true,
-						Placeholder: "Exact in‑game name",
-						MaxLength:   64,
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "mc_username",
+							Label:       "Minecraft Username",
+							Style:       discordgo.TextInputShort,
+							Placeholder: "e.g. Notch",
+							Required:    true,
+						},
 					},
-				}},
-				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					&discordgo.TextInput{
-						CustomID:    "age",
-						Label:       "Age",
-						Style:       discordgo.TextInputShort,
-						Required:    true,
-						Placeholder: "e.g. 18",
-						MaxLength:   8,
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "age",
+							Label:       "Whats your age",
+							Style:       discordgo.TextInputShort,
+							Placeholder: "16+",
+							Required:    true,
+						},
 					},
-				}},
-				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					&discordgo.TextInput{
-						CustomID:    "plan",
-						Label:       "What do you plan to do on the server?",
-						Style:       discordgo.TextInputParagraph,
-						Required:    true,
-						Placeholder: "Build, economy, towns, redstone, etc.",
-						MaxLength:   500,
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "plan",
+							Label:       "what do you plan on doing on the server?",
+							Style:       discordgo.TextInputShort,
+							Placeholder: "build, economy, towns, etc",
+							Required:    true,
+						},
 					},
-				}},
+				},
 			},
 		},
 	})
 }
 
 func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
+	log.Printf("handleWhitelistSubmit: guild=%s user=%s",
+		i.GuildID, i.Member.User.ID)
+
 	username := modalValue(i, "mc_username")
 	age := modalValue(i, "age")
 	plan := modalValue(i, "plan")
+	log.Printf("handleWhitelistSubmit: username=%q age=%q plan=%q", username, age, plan)
+
 	if username == "" || age == "" || plan == "" {
 		a.reply(i, "Missing required fields.", true)
 		return
@@ -230,11 +249,13 @@ func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 
 	uuid, err := a.NameMC.UsernameToUUID(username)
 	if err != nil {
-		a.reply(i, fmt.Sprintf("Could not resolve username %q", username), true)
+		log.Printf("handleWhitelistSubmit: UsernameToUUID(%q) failed: %v", username, err)
+		a.reply(i, fmt.Sprintf("Seems like username %q does not exist.", username), true)
 		return
 	}
 
-	// Send review embed instead of immediate whitelist add
+	log.Printf("handleWhitelistSubmit: resolved %s -> %s", username, uuid)
+
 	embed := &discordgo.MessageEmbed{
 		Title:       "Whitelist Request",
 		Description: "A new whitelist request has been submitted.",
@@ -251,25 +272,36 @@ func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 	}
 
 	components := []discordgo.MessageComponent{
-		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-			&discordgo.Button{
-				CustomID: "approve_" + username + "|" + i.Member.User.ID,
-				Label:    "Approve",
-				Style:    discordgo.SuccessButton,
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.Button{
+					CustomID: "approve_" + username + "|" + i.Member.User.ID,
+					Label:    "Approve",
+					Style:    discordgo.SuccessButton,
+				},
+				discordgo.Button{
+					CustomID: "reject_" + username + "|" + i.Member.User.ID,
+					Label:    "Reject",
+					Style:    discordgo.DangerButton,
+				},
 			},
-			&discordgo.Button{
-				CustomID: "reject_" + username + "|" + i.Member.User.ID,
-				Label:    "Reject",
-				Style:    discordgo.DangerButton,
-			},
-		}},
+		},
 	}
 
-	if a.Cfg.WhitelistRequestsChannelID != "" {
-		_, _ = a.Session.ChannelMessageSendComplex(a.Cfg.WhitelistRequestsChannelID, &discordgo.MessageSend{
-			Embeds:     []*discordgo.MessageEmbed{embed},
-			Components: components,
-		})
+	if a.Cfg.WhitelistRequestsChannelID == "" {
+		log.Printf("handleWhitelistSubmit: WhitelistRequestsChannelID is empty; not sending embed")
+	} else {
+		log.Printf("handleWhitelistSubmit: sending embed to channel %s", a.Cfg.WhitelistRequestsChannelID)
+		_, err := a.Session.ChannelMessageSendComplex(
+			a.Cfg.WhitelistRequestsChannelID,
+			&discordgo.MessageSend{
+				Embeds:     []*discordgo.MessageEmbed{embed},
+				Components: components,
+			},
+		)
+		if err != nil {
+			log.Printf("handleWhitelistSubmit: ChannelMessageSendComplex failed: %v", err)
+		}
 	}
 
 	a.reply(i, fmt.Sprintf("Submitted whitelist request for %s. Staff will review soon.", username), true)
@@ -298,18 +330,25 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 	username := parts[0]
 	requesterID := parts[1]
 
-	// Edit embed
+	// Update the review embed in-place
 	if len(i.Message.Embeds) > 0 {
 		cp := *i.Message.Embeds[0]
-		statusLine := fmt.Sprintf("📝 Request for `%s` was **%s** by <@%s>. (Requested by: <@%s>)",
-			username, ternary(approved, "Approved", "Rejected"), i.Member.User.ID, requesterID)
+
+		statusLine := fmt.Sprintf(
+			"📝 Request for `%s` was **%s** by <@%s>. (Requested by: <@%s>)",
+			username,
+			ternary(approved, "Approved", "Rejected"),
+			i.Member.User.ID,
+			requesterID,
+		)
+
 		if strings.TrimSpace(cp.Description) == "" {
 			cp.Description = statusLine
 		} else {
 			cp.Description += "\n\n" + statusLine
 		}
 
-		// Add/update Decision field
+		// Add/update "Decision" field
 		found := false
 		for _, f := range cp.Fields {
 			if strings.EqualFold(f.Name, "Decision") {
@@ -331,6 +370,7 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 			cp.Color = 0xEF4444
 		}
 
+		// Replace embed & remove the buttons
 		_ = a.Session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseUpdateMessage,
 			Data: &discordgo.InteractionResponseData{
@@ -349,9 +389,8 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 		if a.Bridge.IsConnected() {
 			_, _ = a.Bridge.SendCommand(ctx, "whitelist add "+username)
 		}
-		// Optional DM
 		if dm, err := a.Session.UserChannelCreate(requesterID); err == nil {
-			_, _ = a.Session.ChannelMessageSend(dm.ID, fmt.Sprintf("✅ You have been whitelisted: %s", username))
+			_, _ = a.Session.ChannelMessageSend(dm.ID, fmt.Sprintf("✅ You have been whitelisted on Rotaria!\nWelcome to Rotaria, `%s` 🎉", username))
 		}
 	}
 }
@@ -501,17 +540,18 @@ func (a *App) handleReportActionModal(i *discordgo.InteractionCreate) {
 	// Remove action buttons
 	cp.Color = color
 	cp.Timestamp = time.Now().UTC().Format(time.RFC3339)
+	embeds := []*discordgo.MessageEmbed{&cp}
+	components := []discordgo.MessageComponent{}
 	_, _ = a.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{
 		Channel:    i.ChannelID,
 		ID:         msg.ID,
-		Embeds:     []*discordgo.MessageEmbed{&cp},
-		Components: []discordgo.MessageComponent{},
+		Embeds:     &embeds,
+		Components: &components,
 	})
 	a.reply(i, "Report updated.", true)
 	_ = orig
 }
 
-// helpers
 func modalValue(i *discordgo.InteractionCreate, id string) string {
 	for _, row := range i.ModalSubmitData().Components {
 		if ar, ok := row.(*discordgo.ActionsRow); ok {
@@ -536,9 +576,16 @@ func (a *App) HandleMCEvent(topic, body string) {
 
 	// Status → presence or status channel
 	if topic == "status" {
-		if a.Cfg.ServerStatusChannelID != "" {
-			// _, _ = a.Session.ChannelMessageSend(a.Cfg.ServerStatusChannelID, body)
-			fmt.Println("New status", body)
+		body = strings.TrimSpace(body)
+		if body == "" {
+			return
+		}
+
+		// Set presence text, e.g. "1/20 online"
+		if err := a.Session.UpdateGameStatus(0, body); err != nil {
+			log.Printf("HandleMCEvent: failed to update presence: %v", err)
+		} else {
+			log.Printf("HandleMCEvent: updated presence to %q", body)
 		}
 		return
 	}
@@ -558,7 +605,6 @@ func (a *App) HandleMCEvent(topic, body string) {
 		}
 
 		if a.Blacklist != nil && a.Blacklist.Contains(msg) {
-			// Optionally issue kick
 			if a.Bridge.IsConnected() {
 				ctx := context.Background()
 				_, _ = a.Bridge.SendCommand(ctx, "kick "+username)

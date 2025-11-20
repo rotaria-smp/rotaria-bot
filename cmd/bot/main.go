@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os/signal"
 	"syscall"
@@ -47,6 +48,7 @@ func main() {
 	}
 
 	bridge.SetHandler(func(topic, body string) {
+		fmt.Println("We are in the callback for handleMCEvent!")
 		app.HandleMCEvent(topic, body)
 	})
 

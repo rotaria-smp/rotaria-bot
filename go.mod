@@ -3,7 +3,8 @@ module github.com/rotaria-smp/rotaria-bot
 go 1.24.5
 
 require (
-	github.com/bwmarrin/discordgo v0.27.1
+	github.com/bwmarrin/discordgo v0.29.0
+	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.1
 	github.com/joho/godotenv v1.5.1
 	github.com/rotaria-smp/discordwebhook v0.0.0-20250910154909-ff36bd297286
@@ -12,7 +13,6 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
