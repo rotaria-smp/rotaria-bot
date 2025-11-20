@@ -182,7 +182,7 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 				a.reply(i, fmt.Sprintf("<@%s> is not whitelisted", selectedUser), true)
 				return
 			}
-			a.reply(i, fmt.Sprintf("<@%s> has the ingame name %s", selectedUser, user.Username), true)
+			a.reply(i, fmt.Sprintf("<@%s> has the ingame name `%s`", selectedUser, user.Username), true)
 			return
 
 		case "whitelist":
