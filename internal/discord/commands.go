@@ -60,6 +60,10 @@ func (a *App) onReady(s *discordgo.Session, r *discordgo.Ready) {
 }
 
 func (a *App) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+	if strings.Contains(m.Content, "\"everyone") {
+		_ = s.MessageReactionAdd(m.ChannelID, m.ID, "❌")
+	}
+
 	if m.Author.Bot {
 		return
 	}
@@ -556,6 +560,7 @@ func modalValue(i *discordgo.InteractionCreate, id string) string {
 }
 
 var chatLineRe = regexp.MustCompile(`^<([^>]+)>[ ]?(.*)$`)
+var atEveryone = regexp.MustCompile(`@everyone`)
 
 func (a *App) HandleMCEvent(topic, body string) {
 	body = strings.TrimSpace(body)
@@ -589,6 +594,8 @@ func (a *App) HandleMCEvent(topic, body string) {
 			username = m[1]
 			msg = m[2]
 		}
+
+		msg = atEveryone.ReplaceAllString(msg, "\"everyone")
 
 		if a.Blacklist != nil && a.Blacklist.Contains(msg) {
 			logging.L().Info("Blocked message from user (blacklist hit)", "message", msg, "user", username)
