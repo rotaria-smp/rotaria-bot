@@ -26,15 +26,16 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS whitelist (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         discord_id TEXT NOT NULL UNIQUE,
-        username TEXT NOT NULL
+				minecraft_uuid text NOT NULL UNIQUE,
+        username TEXT NOT NULL UNIQUE
     )`); err != nil {
 		return nil, err
 	}
 	return &Store{db: db}, nil
 }
 
-func (s *Store) Add(ctx context.Context, discordID, username string) error {
-	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO whitelist(discord_id,username) VALUES(?,?)`, discordID, username)
+func (s *Store) Add(ctx context.Context, discordID, minecraft_uuid string, username string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO whitelist(discord_id,minecraft_uuid,username) VALUES(?,?,?)`, discordID, minecraft_uuid, username)
 	return err
 }
 
