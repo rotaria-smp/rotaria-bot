@@ -764,7 +764,7 @@ func (a *App) HandleMCEvent(topic, body string) {
 			logging.L().Info("Blocked message from user (blacklist hit)", "message", msg, "user", username)
 			if a.Bridge.IsConnected() {
 				ctx := context.Background()
-				_, _ = a.Bridge.SendCommand(ctx, "kick "+username)
+				_, _ = a.Bridge.SendCommand(ctx, fmt.Sprintf("kick %s", username))
 			}
 			return
 		}
@@ -794,6 +794,6 @@ func (a *App) sendWebhook(username, content, avatar string) {
 		Flags:     &flag,
 	}
 	if err := discordwebhook.SendMessage(a.Cfg.DiscordWebhookURL, msg); err != nil {
-		logging.L().Error("sendWebhook: webhook send fail", "error", err)
+		logging.L().Error("sendWebhook: webhook send fail", "error", err, "username", username, "content", content, "avatar", avatar)
 	}
 }
