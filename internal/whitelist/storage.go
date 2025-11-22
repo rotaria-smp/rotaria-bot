@@ -4,10 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"time"
 
-	"github.com/rotaria-smp/rotaria-bot/internal/discord/namemc"
-	"github.com/rotaria-smp/rotaria-bot/internal/shared/logging"
 	_ "modernc.org/sqlite"
 )
 
@@ -81,78 +78,4 @@ func (s *Store) GetByDiscord(ctx context.Context, discordID string) (*Entry, err
 func (s *Store) Remove(ctx context.Context, discordID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM whitelist WHERE discord_id=?`, discordID)
 	return err
-}
-
-func (s *Store) BackfillUUIDsFromUsernames(ctx context.Context, c *namemc.Client) error {
-	logging.L().Info("Backfill: starting")
-
-	rows, err := s.db.QueryContext(ctx, `SELECT id, username FROM whitelist`)
-	if err != nil {
-		logging.L().Error("Backfill: query failed", "error", err)
-		return err
-	}
-	defer rows.Close()
-
-	type item struct {
-		ID       int64
-		Username string
-	}
-	var items []item
-
-	for rows.Next() {
-		var it item
-		if err := rows.Scan(&it.ID, &it.Username); err != nil {
-			logging.L().Error("Backfill: scan failed", "error", err)
-			return err
-		}
-		items = append(items, it)
-	}
-	if err := rows.Err(); err != nil {
-		logging.L().Error("Backfill: rows error", "error", err)
-		return err
-	}
-
-	logging.L().Info("Backfill: loaded rows", "count", len(items))
-
-	for _, it := range items {
-		select {
-		case <-ctx.Done():
-			logging.L().Error("Backfill: context cancelled", "error", ctx.Err())
-			return ctx.Err()
-		default:
-		}
-
-		logging.L().Info("Backfill: processing row", "id", it.ID, "username", it.Username)
-
-		uuid, err := c.UsernameToUUID(it.Username)
-		if err != nil {
-			logging.L().Error("Backfill: failed to lookup",
-				"username", it.Username,
-				"id", it.ID,
-				"error", err,
-			)
-			continue
-		}
-
-		if _, err := s.db.ExecContext(
-			ctx,
-			`UPDATE whitelist SET minecraft_uuid=? WHERE id=?`,
-			uuid, it.ID,
-		); err != nil {
-			logging.L().Error("Backfill: failed to update",
-				"username", it.Username,
-				"uuid", uuid,
-				"id", it.ID,
-				"error", err,
-			)
-			continue
-		}
-
-		logging.L().Info("Backfill: updated row", "id", it.ID, "username", it.Username, "uuid", uuid)
-
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	logging.L().Info("Backfill: finished", "rows", len(items))
-	return nil
 }

@@ -254,19 +254,19 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 
 		// 	a.reply(i, fmt.Sprintf("Refreshed Minecraft username for <@%s> to `%s`", selectedUser, user.Username), true)
 		// 	return
-		case "namerefreshall":
-			a.reply(i, "Ok", true)
-			logging.L().Info("onInteraction: updating ALL minecraft usernames in database")
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			go func() {
-				defer cancel()
-				logging.L().Info("Backfill command: starting")
-				if err := a.WLStore.BackfillUUIDsFromUsernames(ctx, a.NameMC); err != nil {
-					logging.L().Error("Backfill command: failed", "error", err)
-				} else {
-					logging.L().Info("Backfill command: completed")
-				}
-			}()
+		// case "namerefreshall":
+		// 	a.reply(i, "Ok", true)
+		// 	logging.L().Info("onInteraction: updating ALL minecraft usernames in database")
+		// 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		// 	go func() {
+		// 		defer cancel()
+		// 		logging.L().Info("Backfill command: starting")
+		// 		if err := a.WLStore.BackfillUUIDsFromUsernames(ctx, a.NameMC); err != nil {
+		// 			logging.L().Error("Backfill command: failed", "error", err)
+		// 		} else {
+		// 			logging.L().Info("Backfill command: completed")
+		// 		}
+		// 	}()
 		case "forceupdateusername":
 			ctx := context.Background()
 			if !a.Bridge.IsConnected() {
