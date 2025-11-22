@@ -202,7 +202,6 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 				}
 			}()
 		case "lookup":
-			// TODO : If user have changed their minecraft name this will be a problem we should save their minecraft UUID in db instead
 			ctx := context.Background()
 			selectedUser := i.ApplicationCommandData().Options[0].UserValue(s).ID
 			user, err := a.WLStore.GetByDiscord(ctx, selectedUser)
@@ -217,56 +216,36 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 			}
 			a.reply(i, fmt.Sprintf("<@%s> has the ingame name `%s`", selectedUser, user.Username), true)
 			return
-		// case "namerefresh":
-		// 	ctx := context.Background()
-		// 	selectedUser := i.Member.User.ID
+		case "namerefresh":
+			ctx := context.Background()
+			selectedUser := i.Member.User
 
-		// 	user, err := a.WLStore.GetByDiscord(ctx, selectedUser)
-		// 	if err != nil {
-		// 		logging.L().Error("onInteraction: Could not lookup user", "error", err, "user", selectedUser)
-		// 		a.reply(i, fmt.Sprintf("Could not lookup <@%s>: %v", selectedUser, err), true)
-		// 		return
-		// 	}
-		// 	if user == nil {
-		// 		a.reply(i, fmt.Sprintf("<@%s> is not whitelisted", selectedUser), true)
-		// 		return
-		// 	}
-		// 	// We need
-		// 	user_minecraft_uuid, err := a.NameMC.UsernameToUUID(user.Username)
-		// 	if user_minecraft_uuid != user.
-		// 	if err != nil {
-		// 		logging.L().Error("onInteraction: Could not resolve UUID to from username", "error", err, "username", user.Username)
-		// 		a.reply(i, fmt.Sprintf("Could not resolve username `%s`: %v", user.Username, err), true)
-		// 		return
-		// 	}
-		// 	username, err := a.NameMC.UUIDToUsername(user_minecraft_uuid)
-		// 	if err != nil {
-		// 		logging.L().Error("onInteraction: Could not resolve username to UUID", "error", err, "uuid", user_minecraft_uuid)
-		// 		a.reply(i, fmt.Sprintf("Could not resolve username `%s`: %v", user.Username, err), true)
-		// 		return
-		// 	}
-		// 	a.WLStore.UpdateUUID(ctx, selectedUser, user_minecraft_uuid)
+			user, err := a.WLStore.GetByDiscord(ctx, selectedUser.ID)
 
-		// 	err = a.Session.GuildMemberNickname(i.GuildID, selectedUser, username)
-		// 	if err != nil {
-		// 		logging.L().Error("onInteraction: Could not update discord user nickname", "error", err, "user", selectedUser)
-		// 	}
+			if err != nil {
+				logging.L().Error("onInteraction: Could not GetByDiscord user", "error", err, "user", selectedUser.ID)
+				a.reply(i, fmt.Sprintf("Could not lookup <@%s>: %v", selectedUser, err), true)
+				return
+			}
 
-		// 	a.reply(i, fmt.Sprintf("Refreshed Minecraft username for <@%s> to `%s`", selectedUser, user.Username), true)
-		// 	return
-		// case "namerefreshall":
-		// 	a.reply(i, "Ok", true)
-		// 	logging.L().Info("onInteraction: updating ALL minecraft usernames in database")
-		// 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		// 	go func() {
-		// 		defer cancel()
-		// 		logging.L().Info("Backfill command: starting")
-		// 		if err := a.WLStore.BackfillUUIDsFromUsernames(ctx, a.NameMC); err != nil {
-		// 			logging.L().Error("Backfill command: failed", "error", err)
-		// 		} else {
-		// 			logging.L().Info("Backfill command: completed")
-		// 		}
-		// 	}()
+			minecraft_username, err := a.NameMC.UUIDToUsername(user.MinecraftUUID)
+
+			// We dont need to change username if its already the same as before
+			// if user.nickname == minecraft_username {
+			// }
+
+			if err != nil {
+				logging.L().Error("onInteraction: Could not resolve UUID to user", "error", err, "username", user.Username, "UUID", user.MinecraftUUID)
+				a.reply(i, "We could not update your nickname at the moment, contact a staff member if this issue persists", true)
+				return
+			}
+			err = a.Session.GuildMemberNickname(i.GuildID, selectedUser.ID, minecraft_username)
+			if err != nil {
+				logging.L().Error("onInteraction: Could not update discord user nickname", "error", err, "user", selectedUser.ID)
+				a.reply(i, "Could not update your nickname, please contact a staff member if this issue persists", true)
+			}
+			a.reply(i, "Discord nickname refreshed to match your ingame name", true)
+			return
 		case "forceupdateusername":
 			ctx := context.Background()
 			if !a.Bridge.IsConnected() {

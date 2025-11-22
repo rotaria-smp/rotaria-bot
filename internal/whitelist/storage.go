@@ -54,6 +54,11 @@ func (s *Store) UpdateUUID(ctx context.Context, discordID string, minecraft_uuid
 	return err
 }
 
+func (s *Store) UpdateUsername(ctx context.Context, discordID, username string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE whitelist SET username=? WHERE discord_id=?`, username, discordID)
+	return err
+}
+
 func (s *Store) UpdateUser(ctx context.Context, discordID, minecraft_UUID, username string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE whitelist SET minecraft_uuid=?, username=? WHERE discord_id=?`, minecraft_UUID, username, discordID)
 	return err
