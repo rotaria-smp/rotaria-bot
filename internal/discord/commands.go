@@ -29,28 +29,6 @@ type App struct {
 var chatLineRe = regexp.MustCompile(`^<([^>]+)>[ ]?(.*)$`)
 var atEveryone = regexp.MustCompile(`@everyone`)
 
-func extractUsernames(raw string) (full string, username string) {
-	// Extract between < and >
-	if !strings.HasPrefix(raw, "<") {
-		return "", ""
-	}
-	endIdx := strings.Index(raw, ">")
-	if endIdx == -1 {
-		return "", ""
-	}
-	full = raw[1:endIdx]
-	// Use regex to get the last word (alphanumeric/underscore) as username
-	re := regexp.MustCompile(`([a-zA-Z0-9_]+)$`)
-	match := re.FindStringSubmatch(full)
-	if len(match) > 1 {
-		username = match[1]
-	} else {
-		username = full
-	}
-	return full, username
-
-}
-
 func NewApp(sess *discordgo.Session, cfg config.Config, bridge *mcbridge.Bridge, wl *whitelist.Store, bl *blacklist.List) *App {
 	return &App{
 		Session:   sess,
@@ -778,7 +756,17 @@ func (a *App) HandleMCEvent(topic, body string) {
 		minecraftName := "server"
 
 		if m := chatLineRe.FindStringSubmatch(body); m != nil {
-			fullUsername, minecraftName = extractUsernames(m[1])
+			// m[1] is e.g. "[Owner] Awiant"
+			fullUsername = m[1]
+
+			// Take only the last word as the MC name
+			nameRe := regexp.MustCompile(`([A-Za-z0-9_]+)$`)
+			if n := nameRe.FindStringSubmatch(fullUsername); len(n) > 1 {
+				minecraftName = n[1] // "Awiant"
+			} else {
+				minecraftName = fullUsername
+			}
+
 			msg = m[2]
 		}
 
