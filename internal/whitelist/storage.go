@@ -54,6 +54,44 @@ func (s *Store) UpdateUUID(ctx context.Context, discordID string, minecraft_uuid
 	return err
 }
 
+func (s *Store) GetByUUID(ctx context.Context, uuid string) (*Entry, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, discord_id, minecraft_uuid, username FROM whitelist WHERE minecraft_uuid=?`,
+		uuid,
+	)
+	var e Entry
+	if err := row.Scan(&e.ID, &e.DiscordID, &e.MinecraftUUID, &e.Username); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &e, nil
+}
+
+func (s *Store) UpdateUsernameByUUID(ctx context.Context, uuid, username string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE whitelist SET username=? WHERE minecraft_uuid=?`,
+		username, uuid,
+	)
+	return err
+}
+
+func (s *Store) GetByUsername(ctx context.Context, username string) (*Entry, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, discord_id, minecraft_uuid, username FROM whitelist WHERE username=?`,
+		username,
+	)
+	var e Entry
+	if err := row.Scan(&e.ID, &e.DiscordID, &e.MinecraftUUID, &e.Username); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &e, nil
+}
+
 func (s *Store) UpdateUsername(ctx context.Context, discordID, username string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE whitelist SET username=? WHERE discord_id=?`, username, discordID)
 	return err

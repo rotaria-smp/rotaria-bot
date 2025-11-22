@@ -18,16 +18,18 @@ import (
 )
 
 type App struct {
-	Session   *discordgo.Session
-	Cfg       config.Config
-	Bridge    *mcbridge.Bridge
-	WLStore   *whitelist.Store
-	Blacklist *blacklist.List
-	NameMC    *namemc.Client
+	Session          *discordgo.Session
+	Cfg              config.Config
+	Bridge           *mcbridge.Bridge
+	WLStore          *whitelist.Store
+	Blacklist        *blacklist.List
+	NameMC           *namemc.Client
+	lastStatusUpdate time.Time
 }
 
 var chatLineRe = regexp.MustCompile(`^<([^>]+)>[ ]?(.*)$`)
 var atEveryone = regexp.MustCompile(`@everyone`)
+var joinLineRe = regexp.MustCompile(`^\*\*([A-Za-z0-9_]+)\*\* joined the server\.$`)
 
 func NewApp(sess *discordgo.Session, cfg config.Config, bridge *mcbridge.Bridge, wl *whitelist.Store, bl *blacklist.List) *App {
 	return &App{
@@ -48,7 +50,6 @@ func (a *App) Register() error {
 
 	// IDK what permission here is wanted we'll use ban permission for now
 	var lookupCommandPermissions int64 = discordgo.PermissionBanMembers
-	var manageNicknamesPermissions int64 = discordgo.PermissionManageNicknames
 	var administratorPermissions int64 = discordgo.PermissionAdministrator
 
 	commands := []*discordgo.ApplicationCommand{
@@ -66,15 +67,10 @@ func (a *App) Register() error {
 			DefaultMemberPermissions: &lookupCommandPermissions,
 			Contexts:                 &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
 		},
-		// {
-		// 	Name:        "namerefresh",
-		// 	Description: "Refresh your nickname to match your Minecraft username",
-		// },
 		{
-			Name:                     "namerefreshall",
-			Description:              "Refresh all whitelisted players discord names to match their Minecraft username",
-			DefaultMemberPermissions: &manageNicknamesPermissions,
-			Contexts:                 &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
+			Name:        "refreshname",
+			Description: "Refresh your nickname to match your Minecraft username",
+			Contexts:    &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
 		},
 		{
 			Name:        "forceupdateusername",
@@ -277,8 +273,8 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 				return
 			}
 
-			_, _ = a.Bridge.SendCommand(ctx, "unwhitelist "+oldUser.Username)
-			_, _ = a.Bridge.SendCommand(ctx, "whitelist add "+newMinecraftName)
+			_, _ = a.Bridge.SendCommand(ctx, fmt.Sprintf("unwhitelist %s", oldUser.Username))
+			_, _ = a.Bridge.SendCommand(ctx, fmt.Sprintf("whitelist add %s", newMinecraftName))
 			logging.L().Info("onInteraction: updating discord user nickname to ingame name")
 
 			err = a.Session.GuildMemberNickname(i.GuildID, selectedUser, newMinecraftName)
@@ -534,6 +530,7 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 			1. Try to whitelist user on minecraft, exit if failed
 			2. Try to add member role, exit if failed
 			3. Try to save entry to database, exit if failed
+			4. Try to rename guild user to minecraft username, Exit if failed
 		*/
 		if _, err := a.Bridge.SendCommand(ctx, fmt.Sprintf("whitelist add %s", username)); err != nil {
 			logging.L().Error("Failed to send whitelist add command to bridge", "error", err)
@@ -553,9 +550,15 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 			return
 		}
 
+		if err = a.Session.GuildMemberNickname(i.GuildID, requesterID, username); err != nil {
+			logging.L().Error("Failed to set guild member nickname during whitelist decision", "error", err)
+			a.reply(i, fmt.Sprintf("Failed to set your nickname, please try again or try contacting @<@%s>", "322015089529978880"), true)
+		}
+
 		if dm, err := a.Session.UserChannelCreate(requesterID); err == nil {
 			_, _ = a.Session.ChannelMessageSend(dm.ID, fmt.Sprintf("✅ You have been whitelisted on Rotaria! Welcome to Rotaria, `%s` 🎉", username))
 		}
+
 	}
 }
 
@@ -725,15 +728,94 @@ func modalValue(i *discordgo.InteractionCreate, id string) string {
 	return ""
 }
 
+func (a *App) handlePlayerJoinSync(mcName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	uuid, err := a.NameMC.UsernameToUUID(mcName)
+	if err != nil {
+		// This will happen for offline/Bedrock/etc – just log and bail out
+		logging.L().Warn("handlePlayerJoinSync: UsernameToUUID failed",
+			"minecraft_name", mcName,
+			"error", err,
+		)
+		return
+	}
+
+	logging.L().Debug("handlePlayerJoinSync: resolved username to UUID",
+		"minecraft_name", mcName,
+		"uuid", uuid,
+	)
+
+	entry, err := a.WLStore.GetByUUID(ctx, uuid)
+	if err != nil {
+		logging.L().Error("handlePlayerJoinSync: DB lookup failed",
+			"minecraft_name", mcName,
+			"uuid", uuid,
+			"error", err,
+		)
+		return
+	}
+	if entry == nil {
+		// They might not be whitelisted via Discord (e.g. whitelisted manually on server) this is bad
+		logging.L().Warn("handlePlayerJoinSync: no DB entry for UUID",
+			"minecraft_name", mcName,
+			"uuid", uuid,
+		)
+		return
+	}
+
+	if entry.Username != mcName {
+		logging.L().Info("handlePlayerJoinSync: username changed, updating DB",
+			"old_username", entry.Username,
+			"new_username", mcName,
+			"uuid", uuid,
+			"discord_id", entry.DiscordID,
+		)
+
+		if err := a.WLStore.UpdateUser(ctx, entry.DiscordID, uuid, mcName); err != nil {
+			logging.L().Error("handlePlayerJoinSync: failed to update DB username",
+				"minecraft_name", mcName,
+				"uuid", uuid,
+				"discord_id", entry.DiscordID,
+				"error", err,
+			)
+			return
+		}
+	}
+
+	if err := a.Session.GuildMemberNickname(a.Cfg.GuildID, entry.DiscordID, mcName); err != nil {
+		logging.L().Error("handlePlayerJoinSync: failed to update discord nickname",
+			"minecraft_name", mcName,
+			"uuid", uuid,
+			"discord_id", entry.DiscordID,
+			"error", err,
+		)
+		return
+	}
+
+	logging.L().Info("handlePlayerJoinSync: updated discord nickname",
+		"minecraft_name", mcName,
+		"uuid", uuid,
+		"discord_id", entry.DiscordID,
+	)
+}
+
 func (a *App) HandleMCEvent(topic, body string) {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return
 	}
-
 	if topic == "status" {
 		body = strings.TrimSpace(body)
 		if body == "" {
+			return
+		}
+
+		// Rate limit status updates to once per minute
+		now := time.Now()
+		if now.Sub(a.lastStatusUpdate) < time.Minute {
+			logging.L().Debug("HandleMCEvent: skipping status update due to rate limit")
 			return
 		}
 
@@ -741,7 +823,24 @@ func (a *App) HandleMCEvent(topic, body string) {
 			logging.L().Error("HandleMCEvent: failed to update presence", "error", err)
 		} else {
 			logging.L().Debug("HandleMCEvent: updated presence", "presence", body)
+			a.lastStatusUpdate = now
 		}
+		return
+	}
+
+	// If a user joins the mc server, lets update the discord nick to match the ingame name
+	if topic == "join" {
+		logging.L().Debug("Player joined", "message", body)
+
+		if m := joinLineRe.FindStringSubmatch(body); m != nil {
+			mcName := m[1] // e.g. "limp4n__"
+			logging.L().Debug("Parsed join username", "minecraft_name", mcName)
+
+			// sync in background so we don't block event handling
+			go a.handlePlayerJoinSync(mcName)
+		}
+
+		a.sendWebhook("Rotaria", body, "https://cdn.discordapp.com/icons/1373389493218050150/24f94fe60c73b4af4956f10dbecb5919.webp")
 		return
 	}
 
