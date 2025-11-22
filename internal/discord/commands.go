@@ -776,8 +776,9 @@ func (a *App) HandleMCEvent(topic, body string) {
 		msg := body
 		fullUsername := "server"
 		minecraftName := "server"
+
 		if m := chatLineRe.FindStringSubmatch(body); m != nil {
-			fullUsername, minecraftName = extractUsernames(msg)
+			fullUsername, minecraftName = extractUsernames(m[1])
 			msg = m[2]
 		}
 
