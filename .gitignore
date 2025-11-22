@@ -3,4 +3,5 @@ bin/
 data/
 logs/
 database.db
+database.db*
 dist

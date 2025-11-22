@@ -48,6 +48,8 @@ func (a *App) Register() error {
 
 	// IDK what permission here is wanted we'll use ban permission for now
 	var lookupCommandPermissions int64 = discordgo.PermissionBanMembers
+	var manageNicknamesPermissions int64 = discordgo.PermissionManageNicknames
+	var administratorPermissions int64 = discordgo.PermissionAdministrator
 
 	commands := []*discordgo.ApplicationCommand{
 		{Name: "list", Description: "List online players"},
@@ -56,12 +58,42 @@ func (a *App) Register() error {
 		{Name: "lookup", Description: "Lookup Minecraft username (admin only)", Options: []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionUser,
-				Name:        "discord_use",
+				Name:        "discord_user",
 				Description: "Discord user ID to lookup",
 				Required:    true,
 			},
 		},
 			DefaultMemberPermissions: &lookupCommandPermissions,
+			Contexts:                 &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
+		},
+		// {
+		// 	Name:        "namerefresh",
+		// 	Description: "Refresh your nickname to match your Minecraft username",
+		// },
+		{
+			Name:                     "namerefreshall",
+			Description:              "Refresh all whitelisted players discord names to match their Minecraft username",
+			DefaultMemberPermissions: &manageNicknamesPermissions,
+			Contexts:                 &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
+		},
+		{
+			Name:        "forceupdateusername",
+			Description: "Forcefully update minecraft username in database and rewhitelists them",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "discord_user",
+					Description: "Discord user ID to alter",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "minecraft_name",
+					Description: "The players new minecraft namn",
+					Required:    true,
+				},
+			},
+			DefaultMemberPermissions: &administratorPermissions,
 			Contexts:                 &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
 		},
 	}
@@ -185,7 +217,97 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 			}
 			a.reply(i, fmt.Sprintf("<@%s> has the ingame name `%s`", selectedUser, user.Username), true)
 			return
+		// case "namerefresh":
+		// 	ctx := context.Background()
+		// 	selectedUser := i.Member.User.ID
 
+		// 	user, err := a.WLStore.GetByDiscord(ctx, selectedUser)
+		// 	if err != nil {
+		// 		logging.L().Error("onInteraction: Could not lookup user", "error", err, "user", selectedUser)
+		// 		a.reply(i, fmt.Sprintf("Could not lookup <@%s>: %v", selectedUser, err), true)
+		// 		return
+		// 	}
+		// 	if user == nil {
+		// 		a.reply(i, fmt.Sprintf("<@%s> is not whitelisted", selectedUser), true)
+		// 		return
+		// 	}
+		// 	// We need
+		// 	user_minecraft_uuid, err := a.NameMC.UsernameToUUID(user.Username)
+		// 	if user_minecraft_uuid != user.
+		// 	if err != nil {
+		// 		logging.L().Error("onInteraction: Could not resolve UUID to from username", "error", err, "username", user.Username)
+		// 		a.reply(i, fmt.Sprintf("Could not resolve username `%s`: %v", user.Username, err), true)
+		// 		return
+		// 	}
+		// 	username, err := a.NameMC.UUIDToUsername(user_minecraft_uuid)
+		// 	if err != nil {
+		// 		logging.L().Error("onInteraction: Could not resolve username to UUID", "error", err, "uuid", user_minecraft_uuid)
+		// 		a.reply(i, fmt.Sprintf("Could not resolve username `%s`: %v", user.Username, err), true)
+		// 		return
+		// 	}
+		// 	a.WLStore.UpdateUUID(ctx, selectedUser, user_minecraft_uuid)
+
+		// 	err = a.Session.GuildMemberNickname(i.GuildID, selectedUser, username)
+		// 	if err != nil {
+		// 		logging.L().Error("onInteraction: Could not update discord user nickname", "error", err, "user", selectedUser)
+		// 	}
+
+		// 	a.reply(i, fmt.Sprintf("Refreshed Minecraft username for <@%s> to `%s`", selectedUser, user.Username), true)
+		// 	return
+		case "namerefreshall":
+			a.reply(i, "Ok", true)
+			logging.L().Info("onInteraction: updating ALL minecraft usernames in database")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			go func() {
+				defer cancel()
+				logging.L().Info("Backfill command: starting")
+				if err := a.WLStore.BackfillUUIDsFromUsernames(ctx, a.NameMC); err != nil {
+					logging.L().Error("Backfill command: failed", "error", err)
+				} else {
+					logging.L().Info("Backfill command: completed")
+				}
+			}()
+		case "forceupdateusername":
+			ctx := context.Background()
+			if !a.Bridge.IsConnected() {
+				a.reply(i, "Minecraft server is not connected; cannot rewhitelist them right now.", true)
+				return
+			}
+			selectedUser := i.ApplicationCommandData().Options[0].UserValue(s).ID
+			newMinecraftName := i.ApplicationCommandData().Options[1].StringValue()
+			oldUser, err := a.WLStore.GetByDiscord(ctx, selectedUser)
+			if err != nil {
+				logging.L().Error("onInteraction: Could not lookup user", "error", err, "user", selectedUser)
+				a.reply(i, fmt.Sprintf("Could not lookup <@%s>: %v", selectedUser, err), true)
+				return
+			}
+			if oldUser == nil {
+				a.reply(i, fmt.Sprintf("<@%s> is not whitelisted", selectedUser), true)
+				return
+			}
+			uuid, err := a.NameMC.UsernameToUUID(newMinecraftName)
+			if err != nil {
+				logging.L().Error("onInteraction: Could not resolve username to UUID", "error", err, "username", newMinecraftName)
+				a.reply(i, fmt.Sprintf("Could not resolve username `%s`: %v", newMinecraftName, err), true)
+				return
+			}
+			err = a.WLStore.UpdateUser(ctx, selectedUser, uuid, newMinecraftName)
+			if err != nil {
+				logging.L().Error("onInteraction: Could not update user", "error", err, "user", selectedUser)
+				a.reply(i, fmt.Sprintf("Could not update user <@%s>: %v", selectedUser, err), true)
+				return
+			}
+
+			_, _ = a.Bridge.SendCommand(ctx, "unwhitelist "+oldUser.Username)
+			_, _ = a.Bridge.SendCommand(ctx, "whitelist add "+newMinecraftName)
+			logging.L().Info("onInteraction: updating discord user nickname to ingame name")
+
+			err = a.Session.GuildMemberNickname(i.GuildID, selectedUser, newMinecraftName)
+			if err != nil {
+				logging.L().Error("onInteraction: Could not update discord user nickname", "error", err, "user", selectedUser)
+			}
+			a.reply(i, fmt.Sprintf("Updated Minecraft username for <@%s> to `%s`", selectedUser, newMinecraftName), true)
+			return
 		case "whitelist":
 			a.openWhitelistModal(i)
 		case "report":
