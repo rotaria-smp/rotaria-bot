@@ -29,6 +29,28 @@ type App struct {
 var chatLineRe = regexp.MustCompile(`^<([^>]+)>[ ]?(.*)$`)
 var atEveryone = regexp.MustCompile(`@everyone`)
 
+func extractUsernames(raw string) (full string, username string) {
+	// Extract between < and >
+	if !strings.HasPrefix(raw, "<") {
+		return "", ""
+	}
+	endIdx := strings.Index(raw, ">")
+	if endIdx == -1 {
+		return "", ""
+	}
+	full = raw[1:endIdx]
+	// Use regex to get the last word (alphanumeric/underscore) as username
+	re := regexp.MustCompile(`([a-zA-Z0-9_]+)$`)
+	match := re.FindStringSubmatch(full)
+	if len(match) > 1 {
+		username = match[1]
+	} else {
+		username = full
+	}
+	return full, username
+
+}
+
 func NewApp(sess *discordgo.Session, cfg config.Config, bridge *mcbridge.Bridge, wl *whitelist.Store, bl *blacklist.List) *App {
 	return &App{
 		Session:   sess,
@@ -751,20 +773,21 @@ func (a *App) HandleMCEvent(topic, body string) {
 	}
 
 	if topic == "chat" {
-		username := "Server"
 		msg := body
+		fullUsername := "server"
+		minecraftName := "server"
 		if m := chatLineRe.FindStringSubmatch(body); m != nil {
-			username = m[1]
+			fullUsername, minecraftName = extractUsernames(msg)
 			msg = m[2]
 		}
 
 		msg = atEveryone.ReplaceAllString(msg, "\"everyone")
 
 		if a.Blacklist != nil && a.Blacklist.Contains(msg) {
-			logging.L().Info("Blocked message from user (blacklist hit)", "message", msg, "user", username)
+			logging.L().Info("Blocked message from user (blacklist hit)", "message", msg, "user", minecraftName)
 			if a.Bridge.IsConnected() {
 				ctx := context.Background()
-				_, _ = a.Bridge.SendCommand(ctx, fmt.Sprintf("kick %s", username))
+				_, _ = a.Bridge.SendCommand(ctx, fmt.Sprintf("kick %s", minecraftName))
 			}
 			return
 		}
@@ -773,7 +796,7 @@ func (a *App) HandleMCEvent(topic, body string) {
 			return
 		}
 
-		a.sendWebhook(username, msg, "https://minotar.net/avatar/"+username+"/128.png")
+		a.sendWebhook(fullUsername, msg, fmt.Sprintf("https://minotar.net/avatar/%s/128.png", minecraftName))
 	}
 }
 
