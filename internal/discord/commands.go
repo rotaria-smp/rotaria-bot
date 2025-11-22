@@ -550,12 +550,32 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 			a.reply(i, fmt.Sprintf("Could not resolve username %q or UUID endpoint is down.", username), true)
 			return
 		}
-		_ = a.WLStore.Add(ctx, requesterID, uuid, username)
-		if a.Bridge.IsConnected() {
-			_, _ = a.Bridge.SendCommand(ctx, "whitelist add "+username)
+
+		/*
+			1. Try to whitelist user on minecraft, exit if failed
+			2. Try to add member role, exit if failed
+			3. Try to save entry to database, exit if failed
+		*/
+		if _, err := a.Bridge.SendCommand(ctx, fmt.Sprintf("whitelist add %s", username)); err != nil {
+			logging.L().Error("Failed to send whitelist add command to bridge", "error", err)
+			a.reply(i, fmt.Sprintf("Failed to send whitelist command to minecraft server, please try again or try contacting @<@%s>", "322015089529978880"), true)
+			return
 		}
+
+		if err := a.Session.GuildMemberRoleAdd(a.Cfg.GuildID, requesterID, a.Cfg.MemberRoleID); err != nil {
+			logging.L().Error("Failed to assign member role during whitelist decision", "error", err)
+			a.reply(i, fmt.Sprintf("Failed to assign member role, please try again or try contacting @<@%s>", "322015089529978880"), true)
+			return
+		}
+
+		if err := a.WLStore.Add(ctx, requesterID, uuid, username); err != nil {
+			logging.L().Error("Failed to add whitelist entry to database", "error", err)
+			a.reply(i, fmt.Sprintf("Failed to assign member role, please try again or try contacting @<@%s>", "322015089529978880"), true)
+			return
+		}
+
 		if dm, err := a.Session.UserChannelCreate(requesterID); err == nil {
-			_, _ = a.Session.ChannelMessageSend(dm.ID, fmt.Sprintf("✅ You have been whitelisted on Rotaria!\nWelcome to Rotaria, `%s` 🎉", username))
+			_, _ = a.Session.ChannelMessageSend(dm.ID, fmt.Sprintf("✅ You have been whitelisted on Rotaria! Welcome to Rotaria, `%s` 🎉", username))
 		}
 	}
 }
