@@ -61,7 +61,19 @@ func (a *App) Register() error {
 				Type:        discordgo.ApplicationCommandOptionUser,
 				Name:        "discord_user",
 				Description: "Discord user ID to lookup",
-				Required:    true,
+				Required:    false,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "minecraft_name",
+				Description: "Minecraft username to lookup",
+				Required:    false,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "minecraft_uuid",
+				Description: "Minecraft UUID to lookup",
+				Required:    false,
 			},
 		},
 			DefaultMemberPermissions: &lookupCommandPermissions,
@@ -198,19 +210,74 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 				}
 			}()
 		case "lookup":
-			ctx := context.Background()
-			selectedUser := i.ApplicationCommandData().Options[0].UserValue(s).ID
-			user, err := a.WLStore.GetByDiscord(ctx, selectedUser)
-			if err != nil {
-				logging.L().Error("onInteraction: Could not lookup user", "error", err, "user", selectedUser)
-				a.reply(i, fmt.Sprintf("Could not lookup <@%s>: %v", selectedUser, err), true)
+			// Deferred ephemeral response to allow network calls (UUID/name resolution)
+			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{Flags: discordgo.MessageFlagsEphemeral},
+			}); err != nil {
+				logging.L().Warn("lookup: defer respond failed", "error", err)
 				return
 			}
-			if user == nil {
-				a.reply(i, fmt.Sprintf("<@%s> is not whitelisted", selectedUser), true)
-				return
-			}
-			a.reply(i, fmt.Sprintf("<@%s> has the ingame name `%s`", selectedUser, user.Username), true)
+			go func() {
+				ctx := context.Background()
+				// Build a map of provided options (only provided options appear in the slice)
+				optMap := make(map[string]*discordgo.ApplicationCommandInteractionDataOption)
+				for _, o := range i.ApplicationCommandData().Options {
+					optMap[o.Name] = o
+				}
+
+				var response string
+				if o, ok := optMap["discord_user"]; ok {
+					selectedUser := o.UserValue(s)
+					entry, err := a.WLStore.GetByDiscord(ctx, selectedUser.ID)
+					if err != nil {
+						response = fmt.Sprintf("Could not lookup <@%s>: %v", selectedUser.ID, err)
+					} else if entry == nil {
+						response = fmt.Sprintf("<@%s> is not whitelisted", selectedUser.ID)
+					} else {
+						response = fmt.Sprintf("<@%s> has the Minecraft name `%s`", selectedUser.ID, entry.Username)
+					}
+				} else if o, ok := optMap["minecraft_name"]; ok {
+					name := strings.TrimSpace(o.StringValue())
+					if name == "" {
+						response = "Minecraft name cannot be empty"
+					} else {
+						uuid, err := a.NameMC.UsernameToUUID(name)
+						if err != nil {
+							response = fmt.Sprintf("Could not resolve username `%s`: %v", name, err)
+						} else {
+							entry, err := a.WLStore.GetByUUID(ctx, uuid)
+							if err != nil {
+								response = fmt.Sprintf("Lookup failed for `%s`: %v", name, err)
+							} else if entry == nil {
+								response = fmt.Sprintf("`%s` (UUID %s) is not in whitelist DB", name, uuid)
+							} else {
+								response = fmt.Sprintf("`%s` is whitelisted (Discord <@%s>)", entry.Username, entry.DiscordID)
+							}
+						}
+					}
+				} else if o, ok := optMap["minecraft_uuid"]; ok {
+					uuid := strings.TrimSpace(o.StringValue())
+					if uuid == "" {
+						response = "Minecraft UUID cannot be empty"
+					} else {
+						entry, err := a.WLStore.GetByUUID(ctx, uuid)
+						if err != nil {
+							response = fmt.Sprintf("Lookup failed for UUID %s: %v", uuid, err)
+						} else if entry == nil {
+							response = fmt.Sprintf("UUID %s is not in whitelist DB", uuid)
+						} else {
+							response = fmt.Sprintf("UUID %s corresponds to `%s` (Discord <@%s>)", uuid, entry.Username, entry.DiscordID)
+						}
+					}
+				} else {
+					response = "Provide at least one option: discord_user / minecraft_name / minecraft_uuid"
+				}
+
+				if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &response}); err != nil {
+					logging.L().Warn("lookup: InteractionResponseEdit failed", "error", err)
+				}
+			}()
 			return
 		case "namerefresh":
 			ctx := context.Background()
