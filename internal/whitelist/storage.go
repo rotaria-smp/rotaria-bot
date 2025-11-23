@@ -122,3 +122,24 @@ func (s *Store) Remove(ctx context.Context, discordID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM whitelist WHERE discord_id=?`, discordID)
 	return err
 }
+
+func (s *Store) TransferDiscord(ctx context.Context, minecraftUUID, newDiscordID string) error {
+	// Ensure target row exists
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id FROM whitelist WHERE minecraft_uuid=?`,
+		minecraftUUID,
+	)
+	var id int64
+	if err := row.Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("minecraft uuid not found")
+		}
+		return err
+	}
+	// Perform transfer
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE whitelist SET discord_id=? WHERE minecraft_uuid=?`,
+		newDiscordID, minecraftUUID,
+	)
+	return err
+}

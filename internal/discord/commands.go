@@ -56,31 +56,29 @@ func (a *App) Register() error {
 		{Name: "list", Description: "List online players"},
 		{Name: "whitelist", Description: "Begin whitelist application"},
 		{Name: "report", Description: "Report an issue"},
-		{Name: "lookup", Description: "Lookup Minecraft username (admin only)", Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionUser,
-				Name:        "discord_user",
-				Description: "Discord user ID to lookup",
-				Required:    false,
-			},
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "minecraft_name",
-				Description: "Minecraft username to lookup",
-				Required:    false,
-			},
-		},
+		{
+			Name:                     "lookup",
+			Description:              "Lookup Minecraft username (admin only)",
 			DefaultMemberPermissions: &lookupCommandPermissions,
 			Contexts:                 &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
-		},
-		{
-			Name:        "refreshname",
-			Description: "Refresh your nickname to match your Minecraft username",
-			Contexts:    &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "discord_user",
+					Description: "Discord user ID to lookup",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "minecraft_name",
+					Description: "Minecraft username to lookup",
+					Required:    false,
+				},
+			},
 		},
 		{
 			Name:        "forceupdateusername",
-			Description: "Forcefully update minecraft username in database and rewhitelists them",
+			Description: "Forcefully update minecraft username in database and rewhitelists them on the server, this will also transfer minecraft ownership to selected user if a discord account is already connected to it",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionUser,
@@ -267,76 +265,115 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 				}
 			}()
 			return
-		case "namerefresh":
-			ctx := context.Background()
-			selectedUser := i.Member.User
-
-			user, err := a.WLStore.GetByDiscord(ctx, selectedUser.ID)
-
-			if err != nil {
-				logging.L().Error("onInteraction: Could not GetByDiscord user", "error", err, "user", selectedUser.ID)
-				a.reply(i, fmt.Sprintf("Could not lookup <@%s>: %v", selectedUser, err), true)
-				return
-			}
-
-			minecraft_username, err := a.NameMC.UUIDToUsername(user.MinecraftUUID)
-
-			// We dont need to change username if its already the same as before
-			// if user.nickname == minecraft_username {
-			// }
-
-			if err != nil {
-				logging.L().Error("onInteraction: Could not resolve UUID to user", "error", err, "username", user.Username, "UUID", user.MinecraftUUID)
-				a.reply(i, "We could not update your nickname at the moment, contact a staff member if this issue persists", true)
-				return
-			}
-			err = a.Session.GuildMemberNickname(i.GuildID, selectedUser.ID, minecraft_username)
-			if err != nil {
-				logging.L().Error("onInteraction: Could not update discord user nickname", "error", err, "user", selectedUser.ID)
-				a.reply(i, "Could not update your nickname, please contact a staff member if this issue persists", true)
-			}
-			a.reply(i, "Discord nickname refreshed to match your ingame name", true)
-			return
 		case "forceupdateusername":
 			ctx := context.Background()
 			if !a.Bridge.IsConnected() {
-				a.reply(i, "Minecraft server is not connected; cannot rewhitelist them right now.", true)
+				a.reply(i, "Minecraft server is not connected; cannot transfer right now.", true)
 				return
 			}
-			selectedUser := i.ApplicationCommandData().Options[0].UserValue(s).ID
+			selectedUser := i.ApplicationCommandData().Options[0].UserValue(s)
 			newMinecraftName := i.ApplicationCommandData().Options[1].StringValue()
-			oldUser, err := a.WLStore.GetByDiscord(ctx, selectedUser)
-			if err != nil {
-				logging.L().Error("onInteraction: Could not lookup user", "error", err, "user", selectedUser)
-				a.reply(i, fmt.Sprintf("Could not lookup <@%s>: %v", selectedUser, err), true)
-				return
-			}
-			if oldUser == nil {
-				a.reply(i, fmt.Sprintf("<@%s> is not whitelisted", selectedUser), true)
-				return
-			}
+
 			uuid, err := a.NameMC.UsernameToUUID(newMinecraftName)
 			if err != nil {
-				logging.L().Error("onInteraction: Could not resolve username to UUID", "error", err, "username", newMinecraftName)
-				a.reply(i, fmt.Sprintf("Could not resolve username `%s`: %v", newMinecraftName, err), true)
-				return
-			}
-			err = a.WLStore.UpdateUser(ctx, selectedUser, uuid, newMinecraftName)
-			if err != nil {
-				logging.L().Error("onInteraction: Could not update user", "error", err, "user", selectedUser)
-				a.reply(i, fmt.Sprintf("Could not update user <@%s>: %v", selectedUser, err), true)
+				logging.L().Error("forceupdateusername: resolve username->UUID failed", "username", newMinecraftName, "error", err)
+				a.reply(i, fmt.Sprintf("Could not resolve `%s`: %v", newMinecraftName, err), true)
 				return
 			}
 
-			_, _ = a.Bridge.SendCommand(ctx, fmt.Sprintf("unwhitelist %s", oldUser.Username))
-			_, _ = a.Bridge.SendCommand(ctx, fmt.Sprintf("whitelist add %s", newMinecraftName))
-			logging.L().Info("onInteraction: updating discord user nickname to ingame name")
-
-			err = a.Session.GuildMemberNickname(i.GuildID, selectedUser, newMinecraftName)
+			entryByUUID, err := a.WLStore.GetByUUID(ctx, uuid)
 			if err != nil {
-				logging.L().Error("onInteraction: Could not update discord user nickname", "error", err, "user", selectedUser)
+				logging.L().Error("forceupdateusername: GetByUUID failed", "uuid", uuid, "error", err)
+				a.reply(i, fmt.Sprintf("Lookup failed for `%s`: %v", newMinecraftName, err), true)
+				return
 			}
-			a.reply(i, fmt.Sprintf("Updated Minecraft username for <@%s> to `%s`", selectedUser, newMinecraftName), true)
+			if entryByUUID == nil {
+				a.reply(i, fmt.Sprintf("`%s` (UUID %s) is not currently whitelisted; cannot transfer.", newMinecraftName, uuid), true)
+				return
+			}
+
+			// Already linked to this discord user; allow force name update if changed and re-whitelist
+			if entryByUUID.DiscordID == selectedUser.ID {
+				if entryByUUID.Username == newMinecraftName {
+					a.reply(i, fmt.Sprintf("<@%s> is already linked to `%s` (no change).", selectedUser.ID, newMinecraftName), true)
+					return
+				}
+				oldName := entryByUUID.Username
+				// Attempt to whitelist new name then unwhitelist old to avoid downtime
+				if _, err := a.Bridge.SendCommand(ctx, fmt.Sprintf("whitelist add %s", newMinecraftName)); err != nil {
+					logging.L().Error("forceupdateusername: whitelist add failed", "new_name", newMinecraftName, "error", err)
+					a.reply(i, fmt.Sprintf("Failed to whitelist new name `%s`: %v", newMinecraftName, err), true)
+					return
+				}
+				if _, err := a.Bridge.SendCommand(ctx, fmt.Sprintf("unwhitelist %s", oldName)); err != nil {
+					logging.L().Warn("forceupdateusername: unwhitelist old name failed", "old_name", oldName, "error", err)
+				}
+				// Update stored username and nickname
+				if err := a.WLStore.UpdateUser(ctx, selectedUser.ID, uuid, newMinecraftName); err != nil {
+					logging.L().Error("forceupdateusername: UpdateUser failed for existing link", "discord_id", selectedUser.ID, "uuid", uuid, "error", err)
+					a.reply(i, fmt.Sprintf("Failed to update username to `%s`: %v (Minecraft whitelist may now reference new name)", newMinecraftName, err), true)
+					return
+				}
+				if err := a.Session.GuildMemberNickname(i.GuildID, selectedUser.ID, newMinecraftName); err != nil {
+					logging.L().Error("forceupdateusername: nickname update failed (existing link)", "discord_id", selectedUser.ID, "error", err)
+				}
+				logging.L().Info("forceupdateusername: updated existing linked username",
+					"discord_id", selectedUser.ID,
+					"old_username", oldName,
+					"new_username", newMinecraftName,
+					"uuid", uuid,
+				)
+				a.reply(i, fmt.Sprintf("Updated Minecraft username for <@%s> from `%s` to `%s` (re-whitelisted).", selectedUser.ID, oldName, newMinecraftName), true)
+				return
+			}
+
+			// Check if selected user already has another whitelist entry
+			existingDiscordEntry, err := a.WLStore.GetByDiscord(ctx, selectedUser.ID)
+			if err != nil {
+				logging.L().Error("forceupdateusername: GetByDiscord failed", "discord_id", selectedUser.ID, "error", err)
+				a.reply(i, fmt.Sprintf("Could not verify existing whitelist for <@%s>: %v", selectedUser.ID, err), true)
+				return
+			}
+			if existingDiscordEntry != nil && existingDiscordEntry.MinecraftUUID != entryByUUID.MinecraftUUID {
+				a.reply(i, fmt.Sprintf("<@%s> already has a different whitelisted Minecraft account (`%s`). Transfer aborted.", selectedUser.ID, existingDiscordEntry.Username), true)
+				return
+			}
+
+			// Transfer discord_id to selectedUser.ID (no whitelist change if name same; if name changed re-whitelist)
+			oldName := entryByUUID.Username
+			if err := a.WLStore.TransferDiscord(ctx, uuid, selectedUser.ID); err != nil {
+				logging.L().Error("forceupdateusername: TransferDiscord failed", "uuid", uuid, "new_discord_id", selectedUser.ID, "error", err)
+				a.reply(i, fmt.Sprintf("Transfer failed for `%s`: %v", newMinecraftName, err), true)
+				return
+			}
+
+			// If the provided new name differs, re-whitelist update
+			if oldName != newMinecraftName {
+				if _, err := a.Bridge.SendCommand(ctx, fmt.Sprintf("whitelist add %s", newMinecraftName)); err != nil {
+					logging.L().Error("forceupdateusername: whitelist add failed (transfer)", "new_name", newMinecraftName, "error", err)
+					a.reply(i, fmt.Sprintf("Transfer done, but failed to whitelist new name `%s`: %v", newMinecraftName, err), true)
+				}
+				if _, err := a.Bridge.SendCommand(ctx, fmt.Sprintf("unwhitelist %s", oldName)); err != nil {
+					logging.L().Warn("forceupdateusername: unwhitelist old name failed (transfer)", "old_name", oldName, "error", err)
+				}
+				if err := a.WLStore.UpdateUser(ctx, selectedUser.ID, uuid, newMinecraftName); err != nil {
+					logging.L().Warn("forceupdateusername: UpdateUser name sync failed", "error", err)
+				}
+			}
+
+			// Update nickname
+			if err := a.Session.GuildMemberNickname(i.GuildID, selectedUser.ID, newMinecraftName); err != nil {
+				logging.L().Error("forceupdateusername: nickname update failed", "discord_id", selectedUser.ID, "error", err)
+			}
+
+			logging.L().Info("forceupdateusername: transferred discord_id",
+				"old_discord_id", entryByUUID.DiscordID,
+				"new_discord_id", selectedUser,
+				"minecraft_name", newMinecraftName,
+				"uuid", uuid,
+			)
+
+			a.reply(i, fmt.Sprintf("Transferred whitelist entry for `%s` to <@%s>.", newMinecraftName, selectedUser), true)
 			return
 		case "whitelist":
 			a.openWhitelistModal(i)
