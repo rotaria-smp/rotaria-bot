@@ -86,6 +86,7 @@ func (a *App) handleReportSubmit(i *discordgo.InteractionCreate) {
 			Components: components,
 		})
 	}
+
 	a.reply(i, "Report submitted.", true)
 }
 
@@ -115,13 +116,14 @@ func (a *App) handleReportActionModal(i *discordgo.InteractionCreate) {
 		return
 	}
 	action := parts[1]
+	orig := parts[2]
 	note := modalValue(i, "moderator_note")
 	if note == "" {
 		note = "(no note)"
 	}
 	msg := i.Message
 	if msg == nil || len(msg.Embeds) == 0 {
-		a.reply(i, "Original report missing.", true)
+		a.reply(i, "Original report message missing.", true)
 		return
 	}
 	cp := *msg.Embeds[0]
@@ -137,12 +139,17 @@ func (a *App) handleReportActionModal(i *discordgo.InteractionCreate) {
 	} else {
 		cp.Description += "\n\n" + line
 	}
+
 	cp.Color = color
 	cp.Timestamp = time.Now().UTC().Format(time.RFC3339)
+	embeds := []*discordgo.MessageEmbed{&cp}
+	components := []discordgo.MessageComponent{}
 	_, _ = a.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{
-		Channel: i.ChannelID,
-		ID:      msg.ID,
-		Embeds:  &[]*discordgo.MessageEmbed{&cp},
+		Channel:    i.ChannelID,
+		ID:         msg.ID,
+		Embeds:     &embeds,
+		Components: &components,
 	})
 	a.reply(i, "Report updated.", true)
+	_ = orig
 }
