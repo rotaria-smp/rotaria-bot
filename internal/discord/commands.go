@@ -69,12 +69,6 @@ func (a *App) Register() error {
 				Description: "Minecraft username to lookup",
 				Required:    false,
 			},
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "minecraft_uuid",
-				Description: "Minecraft UUID to lookup",
-				Required:    false,
-			},
 		},
 			DefaultMemberPermissions: &lookupCommandPermissions,
 			Contexts:                 &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild},
@@ -244,7 +238,15 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 					} else {
 						uuid, err := a.NameMC.UsernameToUUID(name)
 						if err != nil {
-							response = fmt.Sprintf("Could not resolve username `%s`: %v", name, err)
+							// Fallback: direct DB lookup by username if external resolution fails
+							entry, dbErr := a.WLStore.GetByUsername(ctx, name)
+							if dbErr != nil {
+								response = fmt.Sprintf("Could not resolve `%s` and DB lookup failed: %v", name, dbErr)
+							} else if entry == nil {
+								response = fmt.Sprintf("Could not resolve `%s` (UUID service error) and name not found in whitelist DB", name)
+							} else {
+								response = fmt.Sprintf("`%s` appears whitelisted (Discord <@%s>) despite UUID resolution error)", entry.Username, entry.DiscordID)
+							}
 						} else {
 							entry, err := a.WLStore.GetByUUID(ctx, uuid)
 							if err != nil {
@@ -256,22 +258,8 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 							}
 						}
 					}
-				} else if o, ok := optMap["minecraft_uuid"]; ok {
-					uuid := strings.TrimSpace(o.StringValue())
-					if uuid == "" {
-						response = "Minecraft UUID cannot be empty"
-					} else {
-						entry, err := a.WLStore.GetByUUID(ctx, uuid)
-						if err != nil {
-							response = fmt.Sprintf("Lookup failed for UUID %s: %v", uuid, err)
-						} else if entry == nil {
-							response = fmt.Sprintf("UUID %s is not in whitelist DB", uuid)
-						} else {
-							response = fmt.Sprintf("UUID %s corresponds to `%s` (Discord <@%s>)", uuid, entry.Username, entry.DiscordID)
-						}
-					}
 				} else {
-					response = "Provide at least one option: discord_user / minecraft_name / minecraft_uuid"
+					response = "Provide at least one option: discord_user / minecraft_name"
 				}
 
 				if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &response}); err != nil {
