@@ -75,7 +75,6 @@ func (a *App) HandleMCEvent(topic, body string) {
 			fullUsername = m[1]
 
 			// Take only the last word as the MC name
-
 			if n := nameRe.FindStringSubmatch(fullUsername); len(n) > 1 {
 				minecraftName = n[1] // "Awiant"
 			} else {
@@ -85,13 +84,16 @@ func (a *App) HandleMCEvent(topic, body string) {
 			msg = m[2]
 		}
 
-		msg = atEveryone.ReplaceAllString(msg, "\"everyone")
+		// Defang @everyone mentions to a clearly broken form (no leading '@')
+		msg = atEveryone.ReplaceAllString(msg, "everyone")
 
 		if a.Blacklist != nil && a.Blacklist.Contains(msg) {
 			logging.L().Info("Blocked message from user (blacklist hit)", "message", msg, "user", minecraftName)
 			if a.Bridge.IsConnected() {
 				ctx := context.Background()
-				_, _ = a.Bridge.SendCommand(ctx, fmt.Sprintf("kick %s", minecraftName))
+				if _, err := a.Bridge.SendCommand(ctx, fmt.Sprintf("kick %s", minecraftName)); err != nil {
+					logging.L().Error("kick failed after blacklist hit", "minecraft_name", minecraftName, "error", err)
+				}
 			}
 			return
 		}

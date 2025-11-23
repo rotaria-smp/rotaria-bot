@@ -3,9 +3,11 @@ package discord
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/rotaria-smp/rotaria-bot/internal/shared/logging"
 )
 
 func newLookupCommand(perm int64) *discordgo.ApplicationCommand {
@@ -30,6 +32,18 @@ func (a *App) handleLookup(i *discordgo.InteractionCreate) {
 		return
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				stack := make([]byte, 8192)
+				n := runtime.Stack(stack, false)
+				logging.L().Error("lookup panic", "recover", r, "stack", string(stack[:n]))
+				safe := "internal error during lookup"
+				if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &safe}); err != nil {
+					logging.L().Error("lookup panic response edit failed", "error", err)
+				}
+			}
+		}()
+
 		ctx := context.Background()
 		optMap := map[string]*discordgo.ApplicationCommandInteractionDataOption{}
 		for _, o := range i.ApplicationCommandData().Options {
@@ -40,7 +54,8 @@ func (a *App) handleLookup(i *discordgo.InteractionCreate) {
 			u := o.UserValue(s)
 			entry, err := a.WLStore.GetByDiscord(ctx, u.ID)
 			if err != nil {
-				response = fmt.Sprintf("Lookup failed for <@%s>: %v", u.ID, err)
+				logging.L().Error("lookup GetByDiscord failed", "discord_id", u.ID, "error", err)
+				response = fmt.Sprintf("Lookup failed for <@%s>, please try again later.", u.ID)
 			} else if entry == nil {
 				response = fmt.Sprintf("<@%s> not whitelisted", u.ID)
 			} else {
@@ -55,7 +70,8 @@ func (a *App) handleLookup(i *discordgo.InteractionCreate) {
 				if err != nil {
 					entry, dbErr := a.WLStore.GetByUsername(ctx, name)
 					if dbErr != nil {
-						response = fmt.Sprintf("Resolve failed for `%s`: %v", name, dbErr)
+						logging.L().Error("lookup GetByUsername failed", "minecraft_name", name, "error", dbErr)
+						response = fmt.Sprintf("Resolve failed for `%s`, please try again later.", name)
 					} else if entry == nil {
 						response = fmt.Sprintf("`%s` not resolved & not whitelisted", name)
 					} else {
@@ -64,7 +80,8 @@ func (a *App) handleLookup(i *discordgo.InteractionCreate) {
 				} else {
 					entry, err := a.WLStore.GetByUUID(ctx, uuid)
 					if err != nil {
-						response = fmt.Sprintf("Lookup failed for `%s`: %v", name, err)
+						logging.L().Error("lookup GetByUUID failed", "minecraft_name", name, "uuid", uuid, "error", err)
+						response = fmt.Sprintf("Lookup failed for `%s`, please try again later.", name)
 					} else if entry == nil {
 						response = fmt.Sprintf("`%s` (UUID %s) not in whitelist DB", name, uuid)
 					} else {

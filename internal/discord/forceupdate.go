@@ -85,5 +85,5 @@ func (a *App) handleForceUpdate(i *discordgo.InteractionCreate) {
 		"minecraft_name", newName,
 	)
 
-	a.reply(i, fmt.Sprintf("Transferred `%s` to <@%s>`.", newName, selectedUser.ID), true)
+	a.reply(i, fmt.Sprintf("Transferred `%s` to <@%s>.", newName, selectedUser.ID), true)
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/rotaria-smp/rotaria-bot/internal/shared/logging"
 )
 
 func (a *App) openReportModal(i *discordgo.InteractionCreate) {
@@ -85,6 +86,16 @@ func (a *App) handleReportSubmit(i *discordgo.InteractionCreate) {
 			Embeds:     []*discordgo.MessageEmbed{embed},
 			Components: components,
 		})
+		// Success case: keep existing user reply below.
+	} else {
+		// Channel unset: log and inform user.
+		logging.L().Warn("handleReportSubmit: ReportChannelID not configured; report not delivered",
+			"type", t,
+			"reporter_discord_id", i.Member.User.ID,
+			"reported_player", player,
+		)
+		a.reply(i, "Report could not be delivered at the moment. Please contact staff members if this issue persists.", true)
+		return
 	}
 
 	a.reply(i, "Report submitted.", true)

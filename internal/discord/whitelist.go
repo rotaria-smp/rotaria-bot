@@ -177,6 +177,7 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 		})
 	} else {
 		a.reply(i, "Missing embed.", true)
+
 	}
 
 	if approved {
@@ -202,19 +203,19 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 
 		if err := a.Session.GuildMemberRoleAdd(a.Cfg.GuildID, requesterID, a.Cfg.MemberRoleID); err != nil {
 			logging.L().Error("Failed to assign member role during whitelist decision", "error", err)
-			a.reply(i, fmt.Sprintf("Failed to assign member role, please try again or try contacting @<@%s>", "322015089529978880"), true)
+			a.reply(i, fmt.Sprintf("Failed to assign member role, please try again or try contacting <@%s>", "322015089529978880"), true)
 			return
 		}
 
 		if err := a.WLStore.Add(ctx, requesterID, uuid, username); err != nil {
 			logging.L().Error("Failed to add whitelist entry to database", "error", err)
-			a.reply(i, fmt.Sprintf("Failed to assign member role, please try again or try contacting @<@%s>", "322015089529978880"), true)
+			a.reply(i, fmt.Sprintf("Failed to assign member role, please try again or try contacting <@%s>", "322015089529978880"), true)
 			return
 		}
 
 		if err = a.Session.GuildMemberNickname(i.GuildID, requesterID, username); err != nil {
 			logging.L().Error("Failed to set guild member nickname during whitelist decision", "error", err)
-			a.reply(i, fmt.Sprintf("Failed to set your nickname, please try again or try contacting @<@%s>", "322015089529978880"), true)
+			a.reply(i, fmt.Sprintf("Failed to set your nickname, please try again or try contacting <@%s>", "322015089529978880"), true)
 		}
 
 		if dm, err := a.Session.UserChannelCreate(requesterID); err == nil {

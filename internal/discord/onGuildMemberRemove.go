@@ -2,6 +2,7 @@ package discord
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/rotaria-smp/rotaria-bot/internal/shared/logging"
@@ -17,7 +18,10 @@ func (a *App) onGuildMemberRemove(_ *discordgo.Session, ev *discordgo.GuildMembe
 		return
 	}
 	if a.Bridge.IsConnected() {
-		_, _ = a.Bridge.SendCommand(ctx, "unwhitelist "+entry.Username)
+
+		if _, err := a.Bridge.SendCommand(ctx, fmt.Sprintf("unwhitelist %s", entry.Username)); err != nil {
+			logging.L().Error("failed to unwhitelist user on bridge", "username", entry.Username, "error", err)
+		}
 	}
 	_ = a.WLStore.Remove(ctx, ev.User.ID)
 	logging.L().Info("Removed whitelist for departing member", "username", entry.Username, "discord_id", ev.User.ID)
