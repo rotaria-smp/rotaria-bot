@@ -14,7 +14,7 @@ import (
 var (
 	chatLineRe = regexp.MustCompile(`^<([^>]+)>[ ]?(.*)$`)
 	joinLineRe = regexp.MustCompile(`^\*\*([A-Za-z0-9_]+)\*\* joined the server\.$`)
-	atEveryone = regexp.MustCompile(`@everyone`)
+	atEveryone = regexp.MustCompile(`(?i)@(everyone|here)\b`)
 	nameRe     = regexp.MustCompile(`([A-Za-z0-9_]+)$`)
 )
 
@@ -85,7 +85,7 @@ func (a *App) HandleMCEvent(topic, body string) {
 		}
 
 		// Defang @everyone mentions to a clearly broken form (no leading '@')
-		msg = atEveryone.ReplaceAllString(msg, "everyone")
+		msg = atEveryone.ReplaceAllString(msg, `$1`)
 
 		if a.Blacklist != nil && a.Blacklist.Contains(msg) {
 			logging.L().Info("Blocked message from user (blacklist hit)", "message", msg, "user", minecraftName)

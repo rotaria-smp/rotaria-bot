@@ -10,10 +10,6 @@ import (
 )
 
 func (a *App) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	if strings.Contains(m.Content, "everyone") {
-		_ = s.MessageReactionAdd(m.ChannelID, m.ID, "❌")
-	}
-
 	if m.Author.Bot {
 		return
 	}
