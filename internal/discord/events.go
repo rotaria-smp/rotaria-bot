@@ -14,7 +14,7 @@ import (
 var (
 	chatLineRe = regexp.MustCompile(`^<([^>]+)>[ ]?(.*)$`)
 	joinLineRe = regexp.MustCompile(`^\*\*([A-Za-z0-9_]+)\*\* joined the server\.$`)
-	atEveryone = regexp.MustCompile(`@(everyone|here)\b`)
+	atEveryone = regexp.MustCompile(`(?i)@(everyone|here)\b`)
 	nameRe     = regexp.MustCompile(`([A-Za-z0-9_]+)$`)
 )
 
