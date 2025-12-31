@@ -85,7 +85,7 @@ func (a *App) HandleMCEvent(topic, body string) {
 		}
 
 		// Defang @everyone mentions to a clearly broken form (no leading '@')
-		msg = atEveryone.ReplaceAllString(msg, "everyone")
+		msg = atEveryone.ReplaceAllString(msg, "&everyone")
 
 		if a.Blacklist != nil && a.Blacklist.Contains(msg) {
 			logging.L().Info("Blocked message from user (blacklist hit)", "message", msg, "user", minecraftName)
