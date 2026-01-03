@@ -18,6 +18,17 @@ var (
 	nameRe     = regexp.MustCompile(`([A-Za-z0-9_]+)$`)
 )
 
+type webhookJob struct {
+	username string
+	content  string
+	avatar   string
+}
+
+type identKey struct {
+	username string
+	avatar   string
+}
+
 var rotariaAvatarUrl string = "https://cdn.discordapp.com/icons/1373389493218050150/24f94fe60c73b4af4956f10dbecb5919.webp"
 
 func (a *App) HandleMCEvent(topic, body string) {
@@ -184,18 +195,101 @@ func (a *App) sendWebhook(username, content, avatar string) {
 		logging.L().Debug("sendWebhook: DiscordWebhookURL is empty, not sending webhook")
 		return
 	}
-	flag := discordwebhook.MessageFlagSuppressNotifications
-	if content == "" {
+	if strings.TrimSpace(content) == "" {
 		logging.L().Debug("sendWebhook: webhook message is empty will not send.")
 		return
 	}
-	msg := discordwebhook.Message{
-		Content:   &content,
-		Username:  &username,
-		AvatarURL: &avatar,
-		Flags:     &flag,
+
+	job := webhookJob{username: username, content: content, avatar: avatar}
+
+	select {
+	case a.webhookQ <- job:
+		// ok
+	default:
+		logging.L().Warn("sendWebhook: webhook queue full; dropping message", "username", username)
 	}
-	if err := discordwebhook.SendMessage(a.Cfg.DiscordWebhookURL, msg); err != nil {
-		logging.L().Error("sendWebhook: webhook send fail", "error", err, "username", username, "content", content, "avatar", avatar)
+}
+
+func (a *App) webhookWorker() {
+	const (
+		maxPerSecond = 2
+		batchWindow  = 700 * time.Millisecond
+		maxChars     = 1900
+	)
+
+	pace := time.NewTicker(time.Second / maxPerSecond)
+	defer pace.Stop()
+
+	timer := time.NewTimer(batchWindow)
+	timer.Stop()
+
+	for {
+		first, ok := <-a.webhookQ
+		if !ok {
+			return
+		}
+
+		byUser := map[identKey][]string{}
+		byUser[identKey{first.username, first.avatar}] = append(byUser[identKey{first.username, first.avatar}], first.content)
+
+		// Start/reset window
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(batchWindow)
+
+	collect:
+		for {
+			select {
+			case j := <-a.webhookQ:
+				k := identKey{j.username, j.avatar}
+				byUser[k] = append(byUser[k], j.content)
+
+			case <-timer.C:
+				break collect
+			}
+		}
+
+		// Send one message per user group, paced
+		for k, msgs := range byUser {
+			<-pace.C
+
+			content := joinLimited(msgs, "\n", maxChars)
+			username := k.username
+			avatar := k.avatar
+			flag := discordwebhook.MessageFlagSuppressNotifications
+
+			msg := discordwebhook.Message{
+				Content:   &content,
+				Username:  &username,
+				AvatarURL: &avatar,
+				Flags:     &flag,
+			}
+
+			if err := discordwebhook.SendMessage(a.Cfg.DiscordWebhookURL, msg); err != nil {
+				logging.L().Error("webhook send failed", "error", err, "username", username)
+			}
+		}
 	}
+}
+
+func joinLimited(parts []string, sep string, max int) string {
+	var b strings.Builder
+	for i, p := range parts {
+		if i > 0 {
+			if b.Len()+len(sep) > max {
+				break
+			}
+			b.WriteString(sep)
+		}
+		if b.Len()+len(p) > max {
+			b.WriteString("…")
+			break
+		}
+		b.WriteString(p)
+	}
+	return b.String()
 }
