@@ -20,17 +20,23 @@ type App struct {
 	Blacklist        *blacklist.List
 	NameMC           *namemc.Client
 	lastStatusUpdate time.Time
+	webhookQ         chan webhookJob
 }
 
 func NewApp(sess *discordgo.Session, cfg config.Config, bridge *mcbridge.Bridge, wl *whitelist.Store, bl *blacklist.List) *App {
-	return &App{
+	a := &App{
 		Session:   sess,
 		Cfg:       cfg,
 		Bridge:    bridge,
 		WLStore:   wl,
 		Blacklist: bl,
 		NameMC:    namemc.New(),
+		webhookQ:  make(chan webhookJob, 2000),
 	}
+
+	go a.webhookWorker()
+
+	return a
 }
 
 func (a *App) Register() error {
