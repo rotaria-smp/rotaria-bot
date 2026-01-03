@@ -109,13 +109,15 @@ func (q *WebhookQueue) Enqueue(username, content, avatarURL string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-+	if len(q.messages) >= q.maxQueueSize {
+	// Drop oldest if queue is full
+	if len(q.messages) >= q.maxQueueSize {
 		dropped := q.messages[0]
 		q.messages = q.messages[1:]
 		logging.L().Warn("webhook queue full, dropped oldest message",
 			"dropped_username", dropped.Username,
+			"dropped_content", dropped.Content,
 			"dropped_age_seconds", time.Since(dropped.Timestamp).Seconds(),
-			"queue_size", q.maxQueueSize,
+			"queue_size", len(q.messages),
 		)
 	}
 
