@@ -32,7 +32,7 @@ func (a *App) openWhitelistModal(i *discordgo.InteractionCreate) {
 }
 
 func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
-	logging.L().Debug("handleWhitelistSubmit: guild and user", "guild", i.GuildID, "user", i.Member.User.ID)
+	logging.L().Debug("handleWhitelistSubmit: guild and user", "guild", i.GuildID, "user", actorID(i))
 
 	username := modalValue(i, "mc_username")
 	age := modalValue(i, "age")
@@ -58,7 +58,7 @@ func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 		Description: "A new whitelist request has been submitted.",
 		Color:       0x3B82F6,
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Applicant", Value: "<@" + i.Member.User.ID + ">", Inline: true},
+			{Name: "Applicant", Value: "<@" + actorID(i) + ">", Inline: true},
 			{Name: "Minecraft Username", Value: "`" + username + "`", Inline: true},
 			{Name: "UUID", Value: "`" + uuid + "`", Inline: true},
 			{Name: "Age", Value: age, Inline: true},
@@ -72,12 +72,12 @@ func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
 				discordgo.Button{
-					CustomID: "approve_" + username + "|" + i.Member.User.ID,
+					CustomID: "approve_" + username + "|" + actorID(i),
 					Label:    "Approve",
 					Style:    discordgo.SuccessButton,
 				},
 				discordgo.Button{
-					CustomID: "reject_" + username + "|" + i.Member.User.ID,
+					CustomID: "reject_" + username + "|" + actorID(i),
 					Label:    "Reject",
 					Style:    discordgo.DangerButton,
 				},
@@ -106,6 +106,7 @@ func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 
 func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 	if !a.Bridge.IsConnected() {
+		// TODO: rejections would still be able to go through as they do not need server connection
 		a.reply(i, "Minecraft server is not connected; cannot process whitelist decisions right now.", true)
 		return
 	}
@@ -137,7 +138,7 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 			"📝 Request for `%s` was **%s** by <@%s>. (Requested by: <@%s>)",
 			username,
 			ternary(approved, "Approved", "Rejected"),
-			i.Member.User.ID,
+			actorID(i),
 			requesterID,
 		)
 
