@@ -20,6 +20,7 @@ type App struct {
 	Blacklist        *blacklist.List
 	NameMC           *namemc.Client
 	lastStatusUpdate time.Time
+	WebhookQueue     *WebhookQueue
 }
 
 func NewApp(sess *discordgo.Session, cfg config.Config, bridge *mcbridge.Bridge, wl *whitelist.Store, bl *blacklist.List) *App {
@@ -30,6 +31,11 @@ func NewApp(sess *discordgo.Session, cfg config.Config, bridge *mcbridge.Bridge,
 		WLStore:   wl,
 		Blacklist: bl,
 		NameMC:    namemc.New(),
+		WebhookQueue: NewWebhookQueue(
+			cfg.DiscordWebhookURL,
+			2*time.Second,
+			100,           
+		),
 	}
 }
 

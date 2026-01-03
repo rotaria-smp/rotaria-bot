@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rotaria-smp/discordwebhook"
 	"github.com/rotaria-smp/rotaria-bot/internal/shared/logging"
 )
 
@@ -27,8 +26,6 @@ func (a *App) HandleMCEvent(topic, body string) {
 	}
 
 	if topic == "status" {
-
-		// Rate limit status updates to once per minute
 		now := time.Now()
 		if now.Sub(a.lastStatusUpdate) < time.Minute {
 			logging.L().Debug("HandleMCEvent: skipping status update due to rate limit")
@@ -44,7 +41,6 @@ func (a *App) HandleMCEvent(topic, body string) {
 		return
 	}
 
-	// If a user joins the mc server, lets update the discord nick to match the ingame name
 	if topic == "join" {
 		logging.L().Debug("Player joined", "message", body)
 
@@ -52,16 +48,15 @@ func (a *App) HandleMCEvent(topic, body string) {
 			mcName := m[1] // e.g. "limp4n__"
 			logging.L().Debug("Parsed join username", "minecraft_name", mcName)
 
-			// sync in background so we don't block event handling
 			go a.handlePlayerJoinSync(mcName)
 		}
 
-		a.sendWebhook("Rotaria", body, "https://cdn.discordapp.com/icons/1373389493218050150/24f94fe60c73b4af4956f10dbecb5919.webp")
+		a.WebhookQueue.Enqueue("Rotaria", body, rotariaAvatarUrl)
 		return
 	}
 
 	if topic == "leave" || topic == "lifecycle" {
-		a.sendWebhook("Rotaria", body, rotariaAvatarUrl)
+		a.WebhookQueue.Enqueue("Rotaria", body, rotariaAvatarUrl)
 		return
 	}
 
@@ -71,12 +66,10 @@ func (a *App) HandleMCEvent(topic, body string) {
 		minecraftName := "server"
 
 		if m := chatLineRe.FindStringSubmatch(body); m != nil {
-			// m[1] is e.g. "[Owner] Awiant"
 			fullUsername = m[1]
 
-			// Take only the last word as the MC name
 			if n := nameRe.FindStringSubmatch(fullUsername); len(n) > 1 {
-				minecraftName = n[1] // "Awiant"
+				minecraftName = n[1]
 			} else {
 				minecraftName = fullUsername
 			}
@@ -84,7 +77,6 @@ func (a *App) HandleMCEvent(topic, body string) {
 			msg = m[2]
 		}
 
-		// Defang @everyone mentions to a clearly broken form (no leading '@')
 		msg = atEveryone.ReplaceAllString(msg, `$1`)
 
 		if a.Blacklist != nil && a.Blacklist.Contains(msg) {
@@ -102,7 +94,8 @@ func (a *App) HandleMCEvent(topic, body string) {
 			return
 		}
 
-		a.sendWebhook(fullUsername, msg, fmt.Sprintf("https://minotar.net/avatar/%s/128.png", minecraftName))
+		avatarURL := fmt.Sprintf("https://minotar.net/avatar/%s/128.png", minecraftName)
+		a.WebhookQueue.Enqueue(fullUsername, msg, avatarURL)
 	}
 }
 
@@ -112,7 +105,6 @@ func (a *App) handlePlayerJoinSync(mcName string) {
 
 	uuid, err := a.NameMC.UsernameToUUID(mcName)
 	if err != nil {
-		// This will happen for offline/Bedrock/etc – just log and bail out
 		logging.L().Warn("handlePlayerJoinSync: UsernameToUUID failed",
 			"minecraft_name", mcName,
 			"error", err,
@@ -135,7 +127,6 @@ func (a *App) handlePlayerJoinSync(mcName string) {
 		return
 	}
 	if entry == nil {
-		// They might not be whitelisted via Discord (e.g. whitelisted manually on server) this is bad
 		logging.L().Warn("handlePlayerJoinSync: no DB entry for UUID",
 			"minecraft_name", mcName,
 			"uuid", uuid,
@@ -177,25 +168,4 @@ func (a *App) handlePlayerJoinSync(mcName string) {
 		"uuid", uuid,
 		"discord_id", entry.DiscordID,
 	)
-}
-
-func (a *App) sendWebhook(username, content, avatar string) {
-	if a.Cfg.DiscordWebhookURL == "" {
-		logging.L().Debug("sendWebhook: DiscordWebhookURL is empty, not sending webhook")
-		return
-	}
-	flag := discordwebhook.MessageFlagSuppressNotifications
-	if content == "" {
-		logging.L().Debug("sendWebhook: webhook message is empty will not send.")
-		return
-	}
-	msg := discordwebhook.Message{
-		Content:   &content,
-		Username:  &username,
-		AvatarURL: &avatar,
-		Flags:     &flag,
-	}
-	if err := discordwebhook.SendMessage(a.Cfg.DiscordWebhookURL, msg); err != nil {
-		logging.L().Error("sendWebhook: webhook send fail", "error", err, "username", username, "content", content, "avatar", avatar)
-	}
 }
