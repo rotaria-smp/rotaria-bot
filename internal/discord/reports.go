@@ -49,7 +49,7 @@ func (a *App) handleReportSubmit(i *discordgo.InteractionCreate) {
 	}
 
 	fields := []*discordgo.MessageEmbedField{
-		{Name: "Reporter", Value: "<@" + i.Member.User.ID + ">", Inline: true},
+		{Name: "Reporter", Value: "<@" + actorID(i) + ">", Inline: true},
 		{Name: "Type", Value: strings.Title(t), Inline: true},
 	}
 	if player != "" {
@@ -76,8 +76,8 @@ func (a *App) handleReportSubmit(i *discordgo.InteractionCreate) {
 
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-			&discordgo.Button{CustomID: "report_resolve_" + player + "|" + i.Member.User.ID, Label: "Resolve", Style: discordgo.SuccessButton},
-			&discordgo.Button{CustomID: "report_dismiss_" + player + "|" + i.Member.User.ID, Label: "Dismiss", Style: discordgo.DangerButton},
+			&discordgo.Button{CustomID: "report_resolve_" + player + "|" + actorID(i), Label: "Resolve", Style: discordgo.SuccessButton},
+			&discordgo.Button{CustomID: "report_dismiss_" + player + "|" + actorID(i), Label: "Dismiss", Style: discordgo.DangerButton},
 		}},
 	}
 
@@ -91,7 +91,7 @@ func (a *App) handleReportSubmit(i *discordgo.InteractionCreate) {
 		// Channel unset: log and inform user.
 		logging.L().Warn("handleReportSubmit: ReportChannelID not configured; report not delivered",
 			"type", t,
-			"reporter_discord_id", i.Member.User.ID,
+			"reporter_discord_id", actorID(i),
 			"reported_player", player,
 		)
 		a.reply(i, "Report could not be delivered at the moment. Please contact staff members if this issue persists.", true)
@@ -144,7 +144,7 @@ func (a *App) handleReportActionModal(i *discordgo.InteractionCreate) {
 		label = "Dismissed"
 		color = 0xEF4444
 	}
-	line := fmt.Sprintf("📝 %s by <@%s>. Note: %s", label, i.Member.User.ID, note)
+	line := fmt.Sprintf("📝 %s by <@%s>. Note: %s", label, actorID(i), note)
 	if strings.TrimSpace(cp.Description) == "" {
 		cp.Description = line
 	} else {
