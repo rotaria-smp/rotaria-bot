@@ -159,7 +159,7 @@ func (b *Bridge) SendCommand(ctx context.Context, body string) (string, error) {
 		return "", fmt.Errorf("write failed: %w", err)
 	}
 
-	log.Info("sent CMD", "id", id, "body", body)
+	log.Debug("sent CMD", "id", id, "body", body)
 
 	tmr := time.NewTimer(10 * time.Second)
 	defer tmr.Stop()
@@ -170,7 +170,7 @@ func (b *Bridge) SendCommand(ctx context.Context, body string) (string, error) {
 			log.Error("CMD error", "id", id, "error", r.err)
 			return "", r.err
 		}
-		log.Info("CMD result", "id", id, "result", r.body)
+		log.Debug("CMD result", "id", id, "result", r.body)
 		return r.body, nil
 
 	case <-tmr.C:

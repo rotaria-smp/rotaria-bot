@@ -40,7 +40,7 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 		for {
 			_, data, err := c.ReadMessage()
 			if err != nil {
-				log.Debug("client read closed", "error", err)
+				log.Error("client read closed", "error", err)
 				return
 			}
 			s.hub.Broadcast(data)

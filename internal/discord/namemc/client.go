@@ -37,7 +37,7 @@ func (c *Client) UsernameToUUID(username string) (string, error) {
 		"func", "UsernameToUUID",
 		"username", username,
 	)
-	log.Info("start", "url", url)
+	log.Debug("start", "url", url)
 
 	var out struct {
 		ID string `json:"id"`
@@ -47,7 +47,7 @@ func (c *Client) UsernameToUUID(username string) (string, error) {
 		return "", err
 	}
 
-	log.Info("response", "id", out.ID)
+	log.Debug("response", "id", out.ID)
 
 	if out.ID == "" {
 		return "", fmt.Errorf("uuid not found for %q", username)
@@ -68,7 +68,7 @@ func (c *Client) UUIDToUsername(uuid string) (string, error) {
 		"func", "UUIDToUsername",
 		"uuid", uuid,
 	)
-	log.Info("start", "url", url)
+	log.Debug("start", "url", url)
 
 	var out struct {
 		Name string `json:"name"`
@@ -82,7 +82,7 @@ func (c *Client) UUIDToUsername(uuid string) (string, error) {
 	if out.Name == "" {
 		return "", fmt.Errorf("username not found for UUID %q", uuid)
 	}
-	log.Info("response", "name", out.Name)
+	log.Debug("response", "name", out.Name)
 	return out.Name, nil
 }
 
