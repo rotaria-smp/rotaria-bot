@@ -11,6 +11,7 @@ import (
 )
 
 func (a *App) openWhitelistModal(i *discordgo.InteractionCreate) {
+	log := logging.L().With("component", "discord", "module", "whitelist", "func", "openWhitelistModal")
 	_ = a.Session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
@@ -29,15 +30,17 @@ func (a *App) openWhitelistModal(i *discordgo.InteractionCreate) {
 			},
 		},
 	})
+	log.Debug("opened whitelist modal", "user", actorID(i))
 }
 
 func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
-	logging.L().Debug("handleWhitelistSubmit: guild and user", "guild", i.GuildID, "user", actorID(i))
+	log := logging.L().With("component", "discord", "module", "whitelist", "func", "handleWhitelistSubmit")
+	log.Debug("guild and user", "guild", i.GuildID, "user", actorID(i))
 
 	username := modalValue(i, "mc_username")
 	age := modalValue(i, "age")
 	plan := modalValue(i, "plan")
-	logging.L().Debug("handleWhitelistSubmit: received form values", "username", username, "age", age, "plan", plan)
+	log.Debug("received form values", "username", username, "age", age, "plan", plan)
 
 	if username == "" || age == "" || plan == "" {
 		a.reply(i, "Missing required fields.", true)
@@ -46,12 +49,12 @@ func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 
 	uuid, err := a.NameMC.UsernameToUUID(username)
 	if err != nil {
-		logging.L().Debug("handleWhitelistSubmit: UsernameToUUID failed", "username", username, "error", err)
+		log.Warn("UsernameToUUID failed", "username", username, "error", err)
 		a.reply(i, fmt.Sprintf("Seems like username %q does not exist.", username), true)
 		return
 	}
 
-	logging.L().Debug("handleWhitelistSubmit: resolved username to UUID", "username", username, "uuid", uuid)
+	log.Debug("resolved username to UUID", "username", username, "uuid", uuid)
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "Whitelist Request",
@@ -86,9 +89,9 @@ func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 	}
 
 	if a.Cfg.WhitelistRequestsChannelID == "" {
-		logging.L().Debug("handleWhitelistSubmit: WhitelistRequestsChannelID is empty; not sending embed")
+		log.Debug("WhitelistRequestsChannelID is empty; not sending embed")
 	} else {
-		logging.L().Debug("handleWhitelistSubmit: sending embed to channel", "channel", a.Cfg.WhitelistRequestsChannelID)
+		log.Debug("sending embed to channel", "channel", a.Cfg.WhitelistRequestsChannelID)
 		_, err := a.Session.ChannelMessageSendComplex(
 			a.Cfg.WhitelistRequestsChannelID,
 			&discordgo.MessageSend{
@@ -97,7 +100,7 @@ func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 			},
 		)
 		if err != nil {
-			logging.L().Error("handleWhitelistSubmit: ChannelMessageSendComplex failed", "error", err)
+			log.Error("handleWhitelistSubmit: ChannelMessageSendComplex failed", "error", err)
 		}
 	}
 
@@ -105,6 +108,7 @@ func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 }
 
 func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
+	log := logging.L().With("component", "discord", "module", "whitelist", "func", "handleWhitelistDecision")
 	if !a.Bridge.IsConnected() {
 		// TODO: rejections would still be able to go through as they do not need server connection
 		a.reply(i, "Minecraft server is not connected; cannot process whitelist decisions right now.", true)
@@ -185,7 +189,7 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 		ctx := context.Background()
 		uuid, err := a.NameMC.UsernameToUUID(username)
 		if err != nil {
-			logging.L().Error("handleWhitelistDecision: UsernameToUUID failed", "username", username, "error", err)
+			log.Error("handleWhitelistDecision: UsernameToUUID failed", "username", username, "error", err)
 			a.reply(i, fmt.Sprintf("Could not resolve username %q or UUID endpoint is down.", username), true)
 			return
 		}
@@ -197,25 +201,22 @@ func (a *App) handleWhitelistDecision(i *discordgo.InteractionCreate) {
 			4. Try to rename guild user to minecraft username, Exit if failed
 		*/
 		if _, err := a.Bridge.SendCommand(ctx, fmt.Sprintf("whitelist add %s", username)); err != nil {
-			logging.L().Error("Failed to send whitelist add command to bridge", "error", err)
+			log.Error("Failed to send whitelist add command to bridge", "error", err)
 			a.reply(i, fmt.Sprintf("Failed to send whitelist command to minecraft server, please try again or try contacting @<@%s>", "322015089529978880"), true)
 			return
 		}
-
 		if err := a.Session.GuildMemberRoleAdd(a.Cfg.GuildID, requesterID, a.Cfg.MemberRoleID); err != nil {
-			logging.L().Error("Failed to assign member role during whitelist decision", "error", err)
+			log.Error("Failed to assign member role during whitelist decision", "error", err)
 			a.reply(i, fmt.Sprintf("Failed to assign member role, please try again or try contacting <@%s>", "322015089529978880"), true)
 			return
 		}
-
 		if err := a.WLStore.Add(ctx, requesterID, uuid, username); err != nil {
-			logging.L().Error("Failed to add whitelist entry to database", "error", err)
+			log.Error("Failed to add whitelist entry to database", "error", err)
 			a.reply(i, fmt.Sprintf("Failed to assign member role, please try again or try contacting <@%s>", "322015089529978880"), true)
 			return
 		}
-
 		if err = a.Session.GuildMemberNickname(i.GuildID, requesterID, username); err != nil {
-			logging.L().Error("Failed to set guild member nickname during whitelist decision", "error", err)
+			log.Error("Failed to set guild member nickname during whitelist decision", "error", err)
 			a.reply(i, fmt.Sprintf("Failed to set your nickname, please try again or try contacting <@%s>", "322015089529978880"), true)
 		}
 

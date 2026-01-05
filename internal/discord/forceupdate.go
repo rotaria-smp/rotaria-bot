@@ -22,6 +22,7 @@ func newForceUpdateCommand(perm int64) *discordgo.ApplicationCommand {
 }
 
 func (a *App) handleForceUpdate(i *discordgo.InteractionCreate) {
+	log := logging.L().With("component", "discord", "module", "forceupdate", "func", "handleForceUpdate")
 	ctx := context.Background()
 	if !a.Bridge.IsConnected() {
 		a.reply(i, "Minecraft not connected.", true)
@@ -78,7 +79,7 @@ func (a *App) handleForceUpdate(i *discordgo.InteractionCreate) {
 	}
 	_ = a.Session.GuildMemberNickname(i.GuildID, selectedUser.ID, newName)
 
-	logging.L().Info("forceupdateusername transfer",
+	log.Info("forceupdateusername transfer",
 		"old_discord_id", entryByUUID.DiscordID,
 		"new_discord_id", selectedUser.ID,
 		"uuid", uuid,

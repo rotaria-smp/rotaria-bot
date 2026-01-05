@@ -9,6 +9,7 @@ import (
 )
 
 func (a *App) onGuildMemberRemove(_ *discordgo.Session, ev *discordgo.GuildMemberRemove) {
+	log := logging.L().With("component", "discord", "module", "guild", "func", "onGuildMemberRemove")
 	if ev.GuildID != a.Cfg.GuildID {
 		return
 	}
@@ -20,9 +21,9 @@ func (a *App) onGuildMemberRemove(_ *discordgo.Session, ev *discordgo.GuildMembe
 	if a.Bridge.IsConnected() {
 
 		if _, err := a.Bridge.SendCommand(ctx, fmt.Sprintf("unwhitelist %s", entry.Username)); err != nil {
-			logging.L().Error("failed to unwhitelist user on bridge", "username", entry.Username, "error", err)
+			log.Error("failed to unwhitelist user on bridge", "username", entry.Username, "error", err)
 		}
 	}
 	_ = a.WLStore.Remove(ctx, ev.User.ID)
-	logging.L().Info("Removed whitelist for departing member", "username", entry.Username, "discord_id", ev.User.ID)
+	log.Info("Removed whitelist for departing member", "username", entry.Username, "discord_id", ev.User.ID)
 }

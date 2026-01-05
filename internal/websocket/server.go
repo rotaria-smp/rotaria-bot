@@ -21,17 +21,26 @@ func NewServer(addr string, hub *Hub, bridge *mcbridge.Bridge) *Server {
 var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 
 func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
+	log := logging.L().With(
+		"component", "websocket",
+		"module", "server",
+		"func", "handleClient",
+		"remote_addr", r.RemoteAddr,
+		"path", r.URL.Path,
+	)
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		logging.L().Error("handleClient: ws upgrade", "err", err)
+		log.Error("ws upgrade failed", "error", err)
 		return
 	}
+	log.Debug("client connected")
 	s.hub.Add(c)
 	go func() {
 		defer s.hub.Remove(c)
 		for {
 			_, data, err := c.ReadMessage()
 			if err != nil {
+				log.Error("client read closed", "error", err)
 				return
 			}
 			s.hub.Broadcast(data)
@@ -40,19 +49,32 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMinecraft(w http.ResponseWriter, r *http.Request) {
+	log := logging.L().With(
+		"component", "websocket",
+		"module", "server",
+		"func", "handleMinecraft",
+		"remote_addr", r.RemoteAddr,
+		"path", r.URL.Path,
+	)
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		logging.L().Error("handleMinecraft: ws upgrade", "err", err)
+		log.Error("ws upgrade failed", "error", err)
 		return
 	}
-	logging.L().Info("handleMinecraft: Minecraft connected via WebSocket")
+	log.Info("minecraft connected via websocket")
 	s.bridge.Attach(c)
 }
 
 func (s *Server) Start() error {
+	log := logging.L().With(
+		"component", "websocket",
+		"module", "server",
+		"func", "Start",
+		"addr", s.addr,
+	)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleClient)
 	mux.HandleFunc("/mc", s.handleMinecraft)
-	logging.L().Info("websocket listening", "addr", s.addr)
+	log.Info("listening")
 	return http.ListenAndServe(s.addr, mux)
 }

@@ -40,6 +40,7 @@ func NewApp(sess *discordgo.Session, cfg config.Config, bridge *mcbridge.Bridge,
 }
 
 func (a *App) Register() error {
+	log := logging.L().With("component", "discord", "module", "app", "func", "Register")
 	a.Session.AddHandler(a.onReady)
 	a.Session.AddHandler(a.onMessageCreate)
 	a.Session.AddHandler(a.onGuildMemberRemove)
@@ -58,9 +59,10 @@ func (a *App) Register() error {
 
 	for _, c := range cmds {
 		if _, err := a.Session.ApplicationCommandCreate(a.Session.State.User.ID, "", c); err != nil {
-			logging.L().Error("create command failed", "command", c.Name, "err", err)
+			log.Error("create command failed", "command", c.Name, "err", err)
 			return err
 		}
 	}
+	log.Info("registered commands", "count", len(cmds))
 	return nil
 }
