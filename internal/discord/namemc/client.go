@@ -31,18 +31,23 @@ func (c *Client) UsernameToUUID(username string) (string, error) {
 		return "", errors.New("username required")
 	}
 	url := fmt.Sprintf("%s%s?at=%d", c.apiURL, username, time.Now().Unix())
-
-	logging.L().Info("NameMC: UsernameToUUID start", "username", username, "url", url)
+	log := logging.L().With(
+		"component", "discord",
+		"module", "namemc",
+		"func", "UsernameToUUID",
+		"username", username,
+	)
+	log.Info("start", "url", url)
 
 	var out struct {
 		ID string `json:"id"`
 	}
 	if err := c.getJSON(url, &out); err != nil {
-		logging.L().Error("NameMC: UsernameToUUID getJSON failed", "username", username, "error", err)
+		log.Error("getJSON failed", "error", err, "url", url)
 		return "", err
 	}
 
-	logging.L().Info("NameMC: UsernameToUUID got response", "username", username, "id", out.ID)
+	log.Info("response", "id", out.ID)
 
 	if out.ID == "" {
 		return "", fmt.Errorf("uuid not found for %q", username)
@@ -57,32 +62,47 @@ func (c *Client) UUIDToUsername(uuid string) (string, error) {
 
 	url := fmt.Sprintf("%s%s?at=%d", c.uuidAPI, uuid, time.Now().Unix())
 
+	log := logging.L().With(
+		"component", "discord",
+		"module", "namemc",
+		"func", "UUIDToUsername",
+		"uuid", uuid,
+	)
+	log.Info("start", "url", url)
+
 	var out struct {
 		Name string `json:"name"`
 	}
 
 	if err := c.getJSON(url, &out); err != nil {
+		log.Error("getJSON failed", "error", err, "url", url)
 		return "", err
 	}
 
 	if out.Name == "" {
 		return "", fmt.Errorf("username not found for UUID %q", uuid)
 	}
-
+	log.Info("response", "name", out.Name)
 	return out.Name, nil
 }
 
 func (c *Client) getJSON(url string, out any) error {
-	logging.L().Debug("NameMC: GET", "url", url)
+	log := logging.L().With(
+		"component", "discord",
+		"module", "namemc",
+		"func", "getJSON",
+		"url", url,
+	)
+	log.Debug("GET")
 
 	r, err := c.http.Get(url)
 	if err != nil {
-		logging.L().Error("NameMC: GET failed", "url", url, "error", err)
+		log.Error("GET failed", "error", err)
 		return err
 	}
 	defer r.Body.Close()
 
-	logging.L().Debug("NameMC: GET response", "url", url, "status", r.StatusCode)
+	log.Debug("GET response", "status", r.StatusCode)
 
 	if r.StatusCode >= 400 {
 		b, _ := io.ReadAll(r.Body)

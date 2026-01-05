@@ -44,16 +44,27 @@ func New(onEvent func(topic, body string)) *Bridge {
 }
 
 func (b *Bridge) Attach(c *websocket.Conn) {
+	log := logging.L().With(
+		"component", "mcbridge",
+		"module", "bridge",
+		"func", "Attach",
+	)
 	b.mu.Lock()
 	if b.conn != nil {
 		_ = b.conn.Close()
 	}
 	b.conn = c
 	b.mu.Unlock()
+	log.Debug("attached websocket connection")
 	go b.readLoop(c)
 }
 
 func (b *Bridge) readLoop(c *websocket.Conn) {
+	log := logging.L().With(
+		"component", "mcbridge",
+		"module", "bridge",
+		"func", "readLoop",
+	)
 	for {
 		_, data, err := c.ReadMessage()
 		if err != nil {
@@ -61,10 +72,10 @@ func (b *Bridge) readLoop(c *websocket.Conn) {
 		}
 		var f Frame
 		if err := json.Unmarshal(data, &f); err != nil {
-			logging.L().Warn("bridge bad json", "err", err)
+			log.Warn("bad json", "error", err)
 			continue
 		}
-		logging.L().Debug("bridge recv", "type", f.Type, "id", f.ID, "topic", f.Topic)
+		log.Debug("recv", "type", f.Type, "id", f.ID, "topic", f.Topic)
 
 		switch f.Type {
 		case "RES":
@@ -76,7 +87,7 @@ func (b *Bridge) readLoop(c *websocket.Conn) {
 			if ch != nil {
 				ch <- resp{body: f.Body}
 			} else {
-				logging.L().Debug("bridge RES for unknown id", "id", f.ID, "pending", pend)
+				log.Debug("RES for unknown id", "id", f.ID, "pending", pend)
 			}
 
 		case "ERR":
@@ -88,7 +99,7 @@ func (b *Bridge) readLoop(c *websocket.Conn) {
 			if ch != nil {
 				ch <- resp{err: errors.New(f.Msg)}
 			} else {
-				logging.L().Error("bridge ERR for unknown id", "id", f.ID, "pending", pend)
+				log.Error("ERR for unknown id", "id", f.ID, "pending", pend)
 			}
 
 		case "EVT":
@@ -100,7 +111,7 @@ func (b *Bridge) readLoop(c *websocket.Conn) {
 			}
 
 		default:
-			logging.L().Debug("bridge: unknown frame type", "type", f.Type)
+			log.Debug("unknown frame type", "type", f.Type)
 		}
 	}
 
@@ -108,18 +119,23 @@ func (b *Bridge) readLoop(c *websocket.Conn) {
 	defer b.mu.Unlock()
 
 	if b.conn == c {
-		logging.L().Warn("bridge: readLoop closing active conn; failing pending commands", "pending", len(b.pending))
+		log.Warn("closing active conn; failing pending commands", "pending", len(b.pending))
 		b.conn = nil
 		for id, ch := range b.pending {
 			delete(b.pending, id)
 			ch <- resp{err: errors.New("bridge closed")}
 		}
 	} else {
-		logging.L().Warn("bridge: readLoop exit for stale conn")
+		log.Warn("readLoop exit for stale conn")
 	}
 }
 
 func (b *Bridge) SendCommand(ctx context.Context, body string) (string, error) {
+	log := logging.L().With(
+		"component", "mcbridge",
+		"module", "bridge",
+		"func", "SendCommand",
+	)
 	b.mu.Lock()
 	c := b.conn
 	if c == nil {
@@ -143,7 +159,7 @@ func (b *Bridge) SendCommand(ctx context.Context, body string) (string, error) {
 		return "", fmt.Errorf("write failed: %w", err)
 	}
 
-	logging.L().Info("bridge sent CMD", "id", id, "body", body)
+	log.Info("sent CMD", "id", id, "body", body)
 
 	tmr := time.NewTimer(10 * time.Second)
 	defer tmr.Stop()
@@ -151,24 +167,24 @@ func (b *Bridge) SendCommand(ctx context.Context, body string) (string, error) {
 	select {
 	case r := <-ch:
 		if r.err != nil {
-			logging.L().Error("bridge CMD error", "id", id, "err", r.err)
+			log.Error("CMD error", "id", id, "error", r.err)
 			return "", r.err
 		}
-		logging.L().Info("bridge CMD result", "id", id, "result", r.body)
+		log.Info("CMD result", "id", id, "result", r.body)
 		return r.body, nil
 
 	case <-tmr.C:
 		b.mu.Lock()
 		delete(b.pending, id)
 		b.mu.Unlock()
-		logging.L().Warn("bridge CMD timeout", "id", id)
+		log.Warn("CMD timeout", "id", id)
 		return "", errors.New("timeout")
 
 	case <-ctx.Done():
 		b.mu.Lock()
 		delete(b.pending, id)
 		b.mu.Unlock()
-		logging.L().Warn("bridge CMD context done", "id", id, "err", ctx.Err())
+		log.Warn("CMD context done", "id", id, "error", ctx.Err())
 		return "", ctx.Err()
 	}
 }

@@ -11,6 +11,7 @@ import (
 )
 
 func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	log := logging.L().With("component", "discord", "module", "interactions", "func", "onInteraction")
 	switch i.Type {
 	case discordgo.InteractionApplicationCommand:
 		switch i.ApplicationCommandData().Name {
@@ -46,14 +47,16 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 			a.handleWhitelistDecision(i)
 		}
 	}
+	log.Debug("handled interaction", "type", i.Type)
 }
 
 func (a *App) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	log := logging.L().With("component", "discord", "module", "interactions", "func", "handleListCommand")
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{Flags: discordgo.MessageFlagsEphemeral},
 	}); err != nil {
-		logging.L().Warn("list defer failed", "error", err)
+		log.Warn("list defer failed", "error", err)
 		return
 	}
 
@@ -62,10 +65,10 @@ func (a *App) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 			if r := recover(); r != nil {
 				stack := make([]byte, 8192)
 				n := runtime.Stack(stack, false)
-				logging.L().Error("list command panic", "recover", r, "stack", string(stack[:n]))
+				log.Error("list command panic", "recover", r, "stack", string(stack[:n]))
 				out := "Internal error during list command, please try again later."
 				if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &out}); err != nil {
-					logging.L().Error("list panic response edit failed", "error", err)
+					log.Error("list panic response edit failed", "error", err)
 				}
 			}
 		}()
@@ -78,18 +81,21 @@ func (a *App) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 			out = "Error: " + err.Error()
 		}
 		if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &out}); err != nil {
-			logging.L().Error("list response edit failed", "error", err)
+			log.Error("list response edit failed", "error", err)
 		}
 	}()
 }
 
 func (a *App) reply(i *discordgo.InteractionCreate, msg string, eph bool) {
+	log := logging.L().With("component", "discord", "module", "interactions", "func", "reply")
 	flags := discordgo.MessageFlags(0)
 	if eph {
 		flags = discordgo.MessageFlagsEphemeral
 	}
-	_ = a.Session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	if err := a.Session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{Content: msg, Flags: flags},
-	})
+	}); err != nil {
+		log.Warn("reply failed", "error", err)
+	}
 }

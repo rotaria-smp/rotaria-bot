@@ -8,5 +8,6 @@ import (
 )
 
 func (a *App) onReady(_ *discordgo.Session, r *discordgo.Ready) {
-	logging.L().Info("Ready", "user", fmt.Sprintf("%s#%s", r.User.Username, r.User.Discriminator))
+	log := logging.L().With("component", "discord", "module", "ready", "func", "onReady")
+	log.Info("Ready", "user", fmt.Sprintf("%s#%s", r.User.Username, r.User.Discriminator))
 }

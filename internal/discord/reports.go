@@ -10,6 +10,7 @@ import (
 )
 
 func (a *App) openReportModal(i *discordgo.InteractionCreate) {
+	log := logging.L().With("component", "discord", "module", "reports", "func", "openReportModal")
 	_ = a.Session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
@@ -34,9 +35,11 @@ func (a *App) openReportModal(i *discordgo.InteractionCreate) {
 			},
 		},
 	})
+	log.Debug("opened report modal", "user", actorID(i))
 }
 
 func (a *App) handleReportSubmit(i *discordgo.InteractionCreate) {
+	log := logging.L().With("component", "discord", "module", "reports", "func", "handleReportSubmit")
 	t := strings.ToLower(strings.TrimSpace(modalValue(i, "report_type")))
 	player := strings.TrimSpace(modalValue(i, "reported_username"))
 	reason := strings.TrimSpace(modalValue(i, "report_reason"))
@@ -88,8 +91,7 @@ func (a *App) handleReportSubmit(i *discordgo.InteractionCreate) {
 		})
 		// Success case: keep existing user reply below.
 	} else {
-		// Channel unset: log and inform user.
-		logging.L().Warn("handleReportSubmit: ReportChannelID not configured; report not delivered",
+		log.Warn("handleReportSubmit: ReportChannelID not configured; report not delivered",
 			"type", t,
 			"reporter_discord_id", actorID(i),
 			"reported_player", player,
@@ -102,6 +104,7 @@ func (a *App) handleReportSubmit(i *discordgo.InteractionCreate) {
 }
 
 func (a *App) openReportActionModal(i *discordgo.InteractionCreate) {
+	log := logging.L().With("component", "discord", "module", "reports", "func", "openReportActionModal")
 	cid := i.MessageComponentData().CustomID
 	action := "resolve"
 	if strings.HasPrefix(cid, "report_dismiss_") {
@@ -119,9 +122,11 @@ func (a *App) openReportActionModal(i *discordgo.InteractionCreate) {
 			},
 		},
 	})
+	log.Debug("opened report action modal", "user", actorID(i), "action", action)
 }
 
 func (a *App) handleReportActionModal(i *discordgo.InteractionCreate) {
+	// log := logging.L().With("component", "discord", "module", "reports", "func", "handleReportActionModal")
 	parts := strings.SplitN(i.ModalSubmitData().CustomID, "|", 3)
 	if len(parts) != 3 {
 		return

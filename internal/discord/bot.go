@@ -25,13 +25,15 @@ func New(token string) (*Bot, error) {
 }
 
 func (b *Bot) onReady(_ *discordgo.Session, r *discordgo.Ready) {
-	logging.L().Info("Discord connected as", "user", fmt.Sprintf("%s#%s", r.User.Username, r.User.Discriminator))
+	log := logging.L().With("component", "discord", "module", "bot", "func", "onReady")
+	log.Info("Discord connected as", "user", fmt.Sprintf("%s#%s", r.User.Username, r.User.Discriminator))
 }
 
 func (b *Bot) Start() error {
+	log := logging.L().With("component", "discord", "module", "bot", "func", "Start")
 	err := b.session.Open()
 	if err == nil {
-		logging.L().Debug("gateway connected", "sessionID", b.session.State.SessionID)
+		log.Debug("gateway connected", "sessionID", b.session.State.SessionID)
 	}
 	return err
 }
