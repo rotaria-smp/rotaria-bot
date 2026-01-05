@@ -49,7 +49,7 @@ func (a *App) handleWhitelistSubmit(i *discordgo.InteractionCreate) {
 
 	uuid, err := a.NameMC.UsernameToUUID(username)
 	if err != nil {
-		log.Debug("UsernameToUUID failed", "username", username, "error", err)
+		log.Warn("UsernameToUUID failed", "username", username, "error", err)
 		a.reply(i, fmt.Sprintf("Seems like username %q does not exist.", username), true)
 		return
 	}
