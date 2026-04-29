@@ -1,6 +1,7 @@
 package discord
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -105,6 +106,7 @@ func (q *WebhookQueue) Enqueue(username, content, avatarURL string) {
 	if content == "" {
 		return
 	}
+	cleanContent := strings.ReplaceAll(content, "@", "at")
 
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -123,7 +125,7 @@ func (q *WebhookQueue) Enqueue(username, content, avatarURL string) {
 
 	msg := &WebhookMessage{
 		Username:  username,
-		Content:   content,
+		Content:   cleanContent,
 		AvatarURL: avatarURL,
 		Timestamp: time.Now(),
 	}

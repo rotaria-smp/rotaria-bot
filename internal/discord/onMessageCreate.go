@@ -38,8 +38,15 @@ func (a *App) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 	}
 	text = strings.ReplaceAll(text, "\n", " ")
 
+	displayName := m.Author.Username
+
+    if m.Member != nil && m.Member.Nick != "" {
+        displayName = m.Member.Nick
+    }
+
 	ctx := context.Background()
-	payload := fmt.Sprintf("say [Discord] %s: %s", m.Author.Username, text)
+	
+	payload := fmt.Sprintf("say [Discord] %s: %s", displayName , text)
 	logging.L().Debug("Relaying to Minecraft via bridge", "payload", payload)
 
 	out, err := a.Bridge.SendCommand(ctx, payload)
