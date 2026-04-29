@@ -274,12 +274,15 @@ func (a *App) webhookWorker() {
 			username := k.username
 			avatar := k.avatar
 			flag := discordwebhook.MessageFlagSuppressNotifications
+			parseNone := []string{}
+			allowedMentions := discordwebhook.AllowedMentions{Parse: &parseNone}
 
 			msg := discordwebhook.Message{
-				Content:   &content,
-				Username:  &username,
-				AvatarURL: &avatar,
-				Flags:     &flag,
+				Content:         &content,
+				Username:        &username,
+				AvatarURL:       &avatar,
+				Flags:           &flag,
+				AllowedMentions: &allowedMentions,
 			}
 
 			if err := discordwebhook.SendMessage(a.Cfg.DiscordWebhookURL, msg); err != nil {
