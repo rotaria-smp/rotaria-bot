@@ -16,7 +16,7 @@ func (a *App) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 	}
 
 	log.Debug("received message", "channel", m.ChannelID, "author", m.Author.ID, "content", m.Content)
-
+	
 	// Blacklist check
 	if a.Blacklist != nil && a.Blacklist.Contains(m.Content) {
 		log.Info("blocked (blacklist hit)", "message", m.Content, "user", m.Author.ID)
@@ -38,9 +38,13 @@ func (a *App) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 		return
 	}
 	text = strings.ReplaceAll(text, "\n", " ")
+	displayName := m.Author.Username
 
+    if m.Member != nil && m.Member.Nick != "" {
+        displayName = m.Member.Nick
+    }
 	ctx := context.Background()
-	payload := fmt.Sprintf("say [Discord] %s: %s", m.Author.Username, text)
+	payload := fmt.Sprintf("say [Discord] %s: %s", displayName, text)
 	log.Debug("relaying to Minecraft via bridge", "payload", payload)
 
 	out, err := a.Bridge.SendCommand(ctx, payload)
