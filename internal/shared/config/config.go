@@ -19,6 +19,7 @@ type Config struct {
 	WhitelistRequestsChannelID         string
 	MinecraftDiscordMessengerChannelID string
 	ServerStatusChannelID              string
+	UpdatesChannelID                   string
 }
 
 func Load() Config {
@@ -35,6 +36,7 @@ func Load() Config {
 		WhitelistRequestsChannelID:         os.Getenv("WHITELIST_REQUESTS_CHANNEL_ID"),
 		MinecraftDiscordMessengerChannelID: os.Getenv("MinecraftDiscordMessengerChannelID"),
 		ServerStatusChannelID:              os.Getenv("ServerStatusChannelID"),
+		UpdatesChannelID:                   os.Getenv("UPDATES_CHANNEL_ID"),
 	}
 }
 

@@ -25,6 +25,12 @@ func (a *App) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 			a.handleLookup(i)
 		case "forceupdateusername":
 			a.handleForceUpdate(i)
+			case "new":
+				a.handleNewVersion(i)
+		case "downtime":
+			a.handleDowntime(i)
+		case "online":
+			a.handleOnline(i)
 		}
 	case discordgo.InteractionModalSubmit:
 		cid := i.ModalSubmitData().CustomID
