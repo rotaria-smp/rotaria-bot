@@ -55,6 +55,9 @@ func (a *App) Register() error {
 		{Name: "report", Description: "Report an issue"},
 		newLookupCommand(lookupPerm),
 		newForceUpdateCommand(adminPerm),
+		newNewCommand(adminPerm),
+		newDowntimeCommand(adminPerm),
+		newOnlineCommand(adminPerm),
 	}
 
 	for _, c := range cmds {
